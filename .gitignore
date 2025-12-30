@@ -1,0 +1,45 @@
+# Build artifacts
+dist/
+build/
+backend-dist/
+*.dmg
+*.zip
+*.blockmap
+
+# Node
+node_modules/
+package-lock.json
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+.DS_Store?
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# Build outputs
+*.spec
+build_output.log
+rebuild.log
+backend.spec
+run_backend.py
+build.sh
+generate_icon.py
+test_gemini_prompt.py
+
+# Documentation files (build artifacts)
+BUILD_FIXES.md
+CODE_SIGNING.md
+IMAGE_FORMAT_HANDLING.md
+PACKAGING.md
