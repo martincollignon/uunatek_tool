@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Canvas, FabricObject, IText, Point, Rect } from 'fabric';
 import { useCanvasStore } from '../../stores/canvasStore';
 import { useAlignmentGuidesStore } from '../../stores/alignmentGuidesStore';
@@ -72,7 +72,7 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       strokeWidth: 2,
       selectable: false,
       evented: false,
-      excludeFromExport: true,
+      excludeFromExport: false,  // Include in SVG export so boundary is visible in preview
       name: 'canvas-boundary',
     });
     canvas.add(boundary);
@@ -81,29 +81,51 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     fabricRef.current = canvas;
     onCanvasReady(canvas);
 
+    // Helper to get current zoom from viewport transform
+    const getCurrentZoom = () => {
+      const vpt = canvas.viewportTransform;
+      if (!vpt) return 1;
+      // Extract zoom from the transform matrix
+      // For normal: zoom is vpt[0]
+      // For rotated: zoom is vpt[1] (since rotation swaps x and y)
+      return isRotated ? Math.abs(vpt[1]) : Math.abs(vpt[0]);
+    };
+
+    // Helper to apply zoom while preserving rotation
+    const applyZoom = (newZoom: number) => {
+      const canvasHeight = height * SCALE;
+      if (isRotated) {
+        canvas.viewportTransform = [
+          0, newZoom, 0,
+          -newZoom, 0, canvasHeight * newZoom,
+        ];
+      } else {
+        canvas.viewportTransform = [newZoom, 0, 0, newZoom, 0, 0];
+      }
+    };
+
     // Setup zoom controls
     const zoomControls: ZoomControls = {
       zoomIn: () => {
-        let zoom = canvas.getZoom();
+        let zoom = getCurrentZoom();
         zoom = Math.min(zoom * 1.2, 5);
-        canvas.setZoom(zoom);
+        applyZoom(zoom);
         canvas.requestRenderAll();
         if (onZoomChange) onZoomChange(zoom);
       },
       zoomOut: () => {
-        let zoom = canvas.getZoom();
+        let zoom = getCurrentZoom();
         zoom = Math.max(zoom / 1.2, 0.1);
-        canvas.setZoom(zoom);
+        applyZoom(zoom);
         canvas.requestRenderAll();
         if (onZoomChange) onZoomChange(zoom);
       },
       resetZoom: () => {
-        canvas.setZoom(1);
-        canvas.viewportTransform = [1, 0, 0, 1, 0, 0];
+        applyZoom(1);
         canvas.requestRenderAll();
         if (onZoomChange) onZoomChange(1);
       },
-      getZoom: () => canvas.getZoom(),
+      getZoom: () => getCurrentZoom(),
     };
 
     if (onZoomControlsReady) {
@@ -296,7 +318,7 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
   }, [width, height, onCanvasReady, onSelectionChange, setDirty]);
 
   // Helper function to ensure boundary exists and is in the correct position
-  const ensureBoundary = (canvas: Canvas) => {
+  const ensureBoundary = useCallback((canvas: Canvas) => {
     // Check if boundary already exists
     const existingBoundary = canvas.getObjects().find((obj) => (obj as any).name === 'canvas-boundary');
 
@@ -322,13 +344,13 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
         strokeWidth: 2,
         selectable: false,
         evented: false,
-        excludeFromExport: true,
+        excludeFromExport: false,  // Include in SVG export so boundary is visible in preview
         name: 'canvas-boundary',
       });
       canvas.add(boundary);
       canvas.sendObjectToBack(boundary);
     }
-  };
+  }, [width, height]);
 
   // Load canvas data when side changes
   useEffect(() => {
@@ -364,7 +386,7 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     };
 
     load();
-  }, [projectId, side, loadCanvas, setDirty, width, height]);
+  }, [projectId, side, loadCanvas, setDirty, width, height, ensureBoundary]);
 
   // Update static guides when settings change
   useEffect(() => {
@@ -396,20 +418,48 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     const canvas = fabricRef.current;
     const canvasHeight = height * SCALE;
 
+    // Get current zoom level from viewport transform
+    const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
+    const currentZoom = Math.abs(vpt[0] || vpt[1] || 1);
+
     if (isRotated) {
       // Rotate viewport 90° clockwise for landscape editing
       // Objects remain in their original positions, only the view rotates
       canvas.viewportTransform = [
-        0, 1, 0,           // Rotate 90° CW: x' = y
-        -1, 0, canvasHeight, // y' = -x + height
+        0, currentZoom, 0,           // Rotate 90° CW: x' = y, scaled by zoom
+        -currentZoom, 0, canvasHeight * currentZoom, // y' = -x + height, scaled by zoom
       ];
     } else {
-      // Reset to normal portrait view
-      canvas.viewportTransform = [1, 0, 0, 1, 0, 0];
+      // Reset to normal portrait view, preserving zoom
+      canvas.viewportTransform = [currentZoom, 0, 0, currentZoom, 0, 0];
     }
 
+    // Ensure boundary is visible after rotation
+    ensureBoundary(canvas);
     canvas.requestRenderAll();
-  }, [isRotated, width, height]);
+  }, [isRotated, width, height, ensureBoundary]);
+
+  // Safety net: ensure boundary always exists after any state change
+  useEffect(() => {
+    if (!fabricRef.current) return;
+
+    // Short delay to ensure this runs after other effects
+    const timeoutId = setTimeout(() => {
+      if (fabricRef.current) {
+        const boundaryCount = fabricRef.current.getObjects().filter(
+          (obj) => (obj as any).name === 'canvas-boundary'
+        ).length;
+
+        if (boundaryCount === 0) {
+          // Boundary is missing, recreate it
+          ensureBoundary(fabricRef.current);
+          fabricRef.current.requestRenderAll();
+        }
+      }
+    }, 100);
+
+    return () => clearTimeout(timeoutId);
+  }, [projectId, side, isRotated, ensureBoundary]);
 
   return (
     <div
