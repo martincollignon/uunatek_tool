@@ -93,14 +93,17 @@ export function EditorPage() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle delete if we're not editing text
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        const activeElement = document.activeElement as HTMLElement;
-        const isEditingText = activeElement?.tagName === 'INPUT' ||
-                              activeElement?.tagName === 'TEXTAREA' ||
-                              activeElement?.isContentEditable;
+      const activeElement = document.activeElement as HTMLElement;
+      const isEditingText = activeElement?.tagName === 'INPUT' ||
+                            activeElement?.tagName === 'TEXTAREA' ||
+                            activeElement?.isContentEditable;
 
-        if (!isEditingText && fabricCanvas && selectedObject) {
+      // Don't handle keyboard shortcuts while editing text
+      if (isEditingText) return;
+
+      // Handle delete/backspace
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (fabricCanvas && selectedObject) {
           e.preventDefault();
           const active = fabricCanvas.getActiveObjects();
           if (active.length > 0) {
@@ -111,17 +114,62 @@ export function EditorPage() {
           }
         }
       }
+
+      // Handle arrow keys for moving objects
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        if (fabricCanvas && selectedObject) {
+          e.preventDefault();
+
+          // Determine step size: 10px with Shift, 1px otherwise
+          const step = e.shiftKey ? 10 : 1;
+
+          const currentLeft = selectedObject.left || 0;
+          const currentTop = selectedObject.top || 0;
+
+          switch (e.key) {
+            case 'ArrowUp':
+              selectedObject.set('top', currentTop - step);
+              break;
+            case 'ArrowDown':
+              selectedObject.set('top', currentTop + step);
+              break;
+            case 'ArrowLeft':
+              selectedObject.set('left', currentLeft - step);
+              break;
+            case 'ArrowRight':
+              selectedObject.set('left', currentLeft + step);
+              break;
+          }
+
+          selectedObject.setCoords();
+          fabricCanvas.requestRenderAll();
+          setDirty(true);
+        }
+      }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [fabricCanvas, selectedObject]);
+  }, [fabricCanvas, selectedObject, setDirty]);
 
   const handleSave = async () => {
     if (!fabricCanvas || !projectId) return;
     const json = fabricCanvas.toJSON();
     await saveCanvas(projectId, json as Record<string, unknown>, currentSide);
   };
+
+  // Auto-save when canvas becomes dirty
+  useEffect(() => {
+    if (!isDirty || !fabricCanvas || !projectId) return;
+
+    // Debounce auto-save by 500ms to avoid excessive saves
+    const timeoutId = setTimeout(async () => {
+      const json = fabricCanvas.toJSON();
+      await saveCanvas(projectId, json as Record<string, unknown>, currentSide);
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [isDirty, fabricCanvas, projectId, currentSide, saveCanvas]);
 
   const handleAddText = () => {
     if (!fabricCanvas) return;
@@ -650,20 +698,6 @@ export function EditorPage() {
             <Maximize2 size={18} />
           </button>
           <button
-            className={`btn btn-icon ${isRotated ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setRotated(!isRotated)}
-            title="Rotate Canvas View (Landscape/Portrait)"
-          >
-            <RotateCw size={18} />
-          </button>
-          <div className="zoom-level">
-            {Math.round(zoomLevel * 100)}%
-          </div>
-        </div>
-
-        {/* Alignment Guides controls */}
-        <div className="zoom-controls" style={{ bottom: '80px' }}>
-          <button
             className={`btn btn-icon btn-secondary ${showStaticGuides ? 'active' : ''}`}
             onClick={toggleStaticGuides}
             title="Toggle Static Guides"
@@ -674,6 +708,16 @@ export function EditorPage() {
           >
             <Grid3x3 size={18} />
           </button>
+          <button
+            className={`btn btn-icon ${isRotated ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setRotated(!isRotated)}
+            title="Rotate Canvas View (Landscape/Portrait)"
+          >
+            <RotateCw size={18} />
+          </button>
+          <div className="zoom-level">
+            {Math.round(zoomLevel * 100)}%
+          </div>
         </div>
       </div>
 
