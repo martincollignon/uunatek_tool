@@ -31,6 +31,8 @@ export interface FillPatternOptions {
   drawBorder?: boolean;
   /** Rotation angle in degrees (default: 0) */
   rotation?: number;
+  /** Gap between chevrons in mm (default: 0 for continuous, applies to chevron pattern only) */
+  chevronGap?: number;
 }
 
 /**
@@ -333,6 +335,7 @@ export function createChevronFill(options: FillPatternOptions): Group {
     strokeWidth = 1,
     stroke = '#000000',
     rotation = 0,
+    chevronGap = 0,
   } = options;
 
   // Calculate pattern dimensions needed to fill canvas when rotated
@@ -346,7 +349,6 @@ export function createChevronFill(options: FillPatternOptions): Group {
   const chevronWidth = spacingMm * 1.5; // Width of each V shape
   const chevronAmplitude = spacingMm * 0.6; // Height of V peaks/valleys
   const rowSpacing = spacingMm * 2.5; // Generous spacing between rows for Memphis look
-  const chevronGap = spacingMm * 0.3; // Gap between individual chevrons
 
   // Generate horizontal chevron lines across the entire canvas height
   // and clip each line segment to the border frame
@@ -360,29 +362,45 @@ export function createChevronFill(options: FillPatternOptions): Group {
       points.push({ x, y: y + offsetY });
     }
 
-    // Draw each V as separate segments (two lines per chevron) with gaps
-    // Each chevron consists of point i (peak/valley), i+1 (middle), i+2 (valley/peak)
-    for (let i = 0; i < points.length - 2; i += 2) {
-      // Left arm of V (from point i to i+1)
-      const leftArmSegments = clipLineToBorderFrame(
-        points[i].x, points[i].y,
-        points[i + 1].x - chevronGap / 2, points[i + 1].y,
-        adjustedWidth, adjustedHeight, borderMarginMm
-      );
-      for (const seg of leftArmSegments) {
-        const path = `M ${seg.x1 * SCALE} ${seg.y1 * SCALE} L ${seg.x2 * SCALE} ${seg.y2 * SCALE}`;
-        paths.push(new Path(path, { stroke, strokeWidth, fill: '' }));
-      }
+    if (chevronGap > 0) {
+      // Draw each V as separate segments (two lines per chevron) with gaps
+      // Each chevron consists of point i (peak/valley), i+1 (middle), i+2 (valley/peak)
+      for (let i = 0; i < points.length - 2; i += 2) {
+        // Left arm of V (from point i to i+1)
+        const leftArmSegments = clipLineToBorderFrame(
+          points[i].x, points[i].y,
+          points[i + 1].x - chevronGap / 2, points[i + 1].y,
+          adjustedWidth, adjustedHeight, borderMarginMm
+        );
+        for (const seg of leftArmSegments) {
+          const path = `M ${seg.x1 * SCALE} ${seg.y1 * SCALE} L ${seg.x2 * SCALE} ${seg.y2 * SCALE}`;
+          paths.push(new Path(path, { stroke, strokeWidth, fill: '' }));
+        }
 
-      // Right arm of V (from point i+1 to i+2)
-      const rightArmSegments = clipLineToBorderFrame(
-        points[i + 1].x + chevronGap / 2, points[i + 1].y,
-        points[i + 2].x, points[i + 2].y,
-        adjustedWidth, adjustedHeight, borderMarginMm
-      );
-      for (const seg of rightArmSegments) {
-        const path = `M ${seg.x1 * SCALE} ${seg.y1 * SCALE} L ${seg.x2 * SCALE} ${seg.y2 * SCALE}`;
-        paths.push(new Path(path, { stroke, strokeWidth, fill: '' }));
+        // Right arm of V (from point i+1 to i+2)
+        const rightArmSegments = clipLineToBorderFrame(
+          points[i + 1].x + chevronGap / 2, points[i + 1].y,
+          points[i + 2].x, points[i + 2].y,
+          adjustedWidth, adjustedHeight, borderMarginMm
+        );
+        for (const seg of rightArmSegments) {
+          const path = `M ${seg.x1 * SCALE} ${seg.y1 * SCALE} L ${seg.x2 * SCALE} ${seg.y2 * SCALE}`;
+          paths.push(new Path(path, { stroke, strokeWidth, fill: '' }));
+        }
+      }
+    } else {
+      // Draw continuous chevron line (original behavior)
+      for (let i = 0; i < points.length - 1; i++) {
+        const clippedSegments = clipLineToBorderFrame(
+          points[i].x, points[i].y,
+          points[i + 1].x, points[i + 1].y,
+          adjustedWidth, adjustedHeight, borderMarginMm
+        );
+
+        for (const seg of clippedSegments) {
+          const path = `M ${seg.x1 * SCALE} ${seg.y1 * SCALE} L ${seg.x2 * SCALE} ${seg.y2 * SCALE}`;
+          paths.push(new Path(path, { stroke, strokeWidth, fill: '' }));
+        }
       }
     }
   }
