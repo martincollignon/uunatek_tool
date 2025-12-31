@@ -28,14 +28,11 @@ __pycache__/
 .LSOverride
 Thumbs.db
 
-# Build outputs
-*.spec
+# Build outputs (logs only, not scripts)
 build_output.log
 rebuild.log
-backend.spec
-run_backend.py
-build.sh
-generate_icon.py
+
+# Temporary test/utility scripts
 test_gemini_prompt.py
 
 # Documentation files (build artifacts)
