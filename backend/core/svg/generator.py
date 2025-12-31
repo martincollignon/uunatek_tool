@@ -66,6 +66,8 @@ class SVGGenerator:
                 self._add_text(dwg, obj)
             elif obj_type.lower() == "image":  # Case-insensitive check for Fabric.js "Image" type
                 self._add_image(dwg, obj)
+            elif obj_type == "group":
+                self._add_group(dwg, obj)
             else:
                 logger.debug(f"Unknown object type: {obj_type}")
 
@@ -446,3 +448,154 @@ class SVGGenerator:
             "Raster image embedded in SVG. For best plotting results, "
             "consider vectorizing the image first (convert to paths)."
         )
+
+    def _add_group(self, dwg: svgwrite.Drawing, obj: dict):
+        """
+        Add group element.
+
+        Groups in Fabric.js contain multiple objects positioned relative to the group.
+        We need to handle the group's transform and then recursively add each child object.
+        """
+        # Get group's objects
+        objects = obj.get("objects", [])
+        if not objects:
+            return
+
+        # Create SVG group
+        group = dwg.g()
+
+        # Get group transform
+        transform = self._get_transform(obj)
+        if transform:
+            group.attribs["transform"] = transform
+
+        # Process each child object
+        for child_obj in objects:
+            child_type = child_obj.get("type", "")
+
+            if child_type == "path":
+                self._add_path_to_group(group, child_obj)
+            elif child_type == "rect":
+                self._add_rect_to_group(group, child_obj)
+            elif child_type == "circle":
+                self._add_circle_to_group(group, child_obj)
+            elif child_type == "ellipse":
+                self._add_ellipse_to_group(group, child_obj)
+            elif child_type == "line":
+                self._add_line_to_group(group, child_obj)
+            elif child_type == "polyline":
+                self._add_polyline_to_group(group, child_obj)
+            elif child_type == "polygon":
+                self._add_polygon_to_group(group, child_obj)
+            else:
+                logger.debug(f"Unknown group child type: {child_type}")
+
+        dwg.add(group)
+
+    def _add_path_to_group(self, group: svgwrite.container.Group, obj: dict):
+        """Add path element to a group."""
+        path_data = obj.get("path", [])
+        if not path_data:
+            return
+
+        # Convert fabric.js path array to SVG d string with pixel-to-mm conversion
+        d_parts = []
+        for segment in path_data:
+            if isinstance(segment, list) and segment:
+                cmd = segment[0]
+                params = segment[1:]
+                converted_params = [self._px_to_mm(p) if isinstance(p, (int, float)) else p for p in params]
+                d_parts.append(f"{cmd} {' '.join(str(p) for p in converted_params)}")
+
+        d = " ".join(d_parts)
+        props = self._get_stroke_props(obj)
+        transform = self._get_transform(obj)
+
+        path = group.path(d=d, **props)
+        if transform:
+            path.attribs["transform"] = transform
+
+    def _add_rect_to_group(self, group: svgwrite.container.Group, obj: dict):
+        """Add rectangle element to a group."""
+        width = self._px_to_mm(obj.get("width", 0))
+        height = self._px_to_mm(obj.get("height", 0))
+
+        props = self._get_stroke_props(obj)
+        transform = self._get_transform(obj)
+
+        origin_x = obj.get("originX", "left")
+        origin_y = obj.get("originY", "top")
+
+        x = -width / 2 if origin_x == "center" else 0
+        y = -height / 2 if origin_y == "center" else 0
+
+        rect = group.rect(insert=(x, y), size=(width, height), **props)
+        if transform:
+            rect.attribs["transform"] = transform
+
+    def _add_circle_to_group(self, group: svgwrite.container.Group, obj: dict):
+        """Add circle element to a group."""
+        radius = self._px_to_mm(obj.get("radius", 0))
+
+        props = self._get_stroke_props(obj)
+        transform = self._get_transform(obj)
+
+        circle = group.circle(center=(0, 0), r=radius, **props)
+        if transform:
+            circle.attribs["transform"] = transform
+
+    def _add_ellipse_to_group(self, group: svgwrite.container.Group, obj: dict):
+        """Add ellipse element to a group."""
+        rx = self._px_to_mm(obj.get("rx", 0))
+        ry = self._px_to_mm(obj.get("ry", 0))
+
+        props = self._get_stroke_props(obj)
+        transform = self._get_transform(obj)
+
+        ellipse = group.ellipse(center=(0, 0), r=(rx, ry), **props)
+        if transform:
+            ellipse.attribs["transform"] = transform
+
+    def _add_line_to_group(self, group: svgwrite.container.Group, obj: dict):
+        """Add line element to a group."""
+        x1 = self._px_to_mm(obj.get("x1", 0))
+        y1 = self._px_to_mm(obj.get("y1", 0))
+        x2 = self._px_to_mm(obj.get("x2", 0))
+        y2 = self._px_to_mm(obj.get("y2", 0))
+
+        props = self._get_stroke_props(obj)
+        transform = self._get_transform(obj)
+
+        line = group.line(start=(x1, y1), end=(x2, y2), **props)
+        if transform:
+            line.attribs["transform"] = transform
+
+    def _add_polyline_to_group(self, group: svgwrite.container.Group, obj: dict):
+        """Add polyline element to a group."""
+        points = obj.get("points", [])
+        if not points:
+            return
+
+        point_tuples = [(self._px_to_mm(p.get("x", 0)), self._px_to_mm(p.get("y", 0))) for p in points]
+
+        props = self._get_stroke_props(obj)
+        transform = self._get_transform(obj)
+
+        polyline = group.polyline(points=point_tuples, **props)
+        if transform:
+            polyline.attribs["transform"] = transform
+
+    def _add_polygon_to_group(self, group: svgwrite.container.Group, obj: dict):
+        """Add polygon element to a group."""
+        points = obj.get("points", [])
+        if not points:
+            return
+
+        point_tuples = [(self._px_to_mm(p.get("x", 0)), self._px_to_mm(p.get("y", 0))) for p in points]
+
+        props = self._get_stroke_props(obj)
+        transform = self._get_transform(obj)
+
+        polygon = group.polygon(points=point_tuples, **props)
+        if transform:
+            polygon.attribs["transform"] = transform
