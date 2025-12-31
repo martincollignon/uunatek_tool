@@ -1,0 +1,67 @@
+{
+  "name": "pen-plotter-app",
+  "version": "1.0.0",
+  "description": "iDraw 2.0 Pen Plotter Control Application",
+  "main": "electron/main.js",
+  "scripts": {
+    "electron:dev": "electron .",
+    "electron:build": "electron-builder",
+    "build:frontend": "cd frontend && npm run build",
+    "build:backend": "cd backend && source venv/bin/activate && cd .. && pyinstaller backend.spec --noconfirm",
+    "build:all": "npm run build:frontend && npm run build:backend && npm run electron:build",
+    "package": "npm run build:all"
+  },
+  "build": {
+    "appId": "com.penplotter.app",
+    "productName": "Pen Plotter",
+    "files": [
+      "electron/**/*",
+      "frontend/dist/**/*",
+      "backend-dist/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "icon": "assets/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "extraResources": [
+        {
+          "from": "backend-dist",
+          "to": "backend",
+          "filter": ["**/*"]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "Pen Plotter Installer",
+      "icon": "assets/icon.icns",
+      "background": "assets/dmg-background.png",
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "contents": [
+        {
+          "x": 144,
+          "y": 200,
+          "type": "file"
+        },
+        {
+          "x": 396,
+          "y": 200,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "^35.7.5",
+    "electron-builder": "^24.9.1"
+  },
+  "dependencies": {
+    "electron-is-dev": "^2.0.0"
+  }
+}
