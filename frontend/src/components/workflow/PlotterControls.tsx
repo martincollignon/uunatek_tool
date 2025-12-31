@@ -19,7 +19,7 @@ export function PlotterControls() {
 
   const [selectedPort, setSelectedPort] = useState<string>('');
   const [showCalibration, setShowCalibration] = useState(false);
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Initial fetch on mount
   useEffect(() => {
