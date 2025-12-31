@@ -7,6 +7,7 @@ import {
   drawAlignmentGuides,
   clearAlignmentGuides,
   drawStaticGuides,
+  resetSnapState,
 } from '../../utils/alignmentGuides';
 import type { CanvasSide } from '../../types';
 
@@ -126,6 +127,10 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       setDirty(true);
     });
 
+    // Track last snap positions to prevent jitter
+    let lastSnapLeft: number | undefined;
+    let lastSnapTop: number | undefined;
+
     // Handle object moving for alignment guides
     canvas.on('object:moving', (e) => {
       const target = e.target;
@@ -140,13 +145,29 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
 
         // Apply snapping if enabled
         if (snapToGuides) {
-          if (result.snapLeft !== undefined) {
+          // Only update position if the snap target changed to prevent jitter
+          const snapLeftChanged = result.snapLeft !== lastSnapLeft;
+          const snapTopChanged = result.snapTop !== lastSnapTop;
+
+          if (snapLeftChanged && result.snapLeft !== undefined) {
             target.set('left', result.snapLeft);
+            lastSnapLeft = result.snapLeft;
+          } else if (result.snapLeft === undefined && lastSnapLeft !== undefined) {
+            // Clear last snap when no longer snapping
+            lastSnapLeft = undefined;
           }
-          if (result.snapTop !== undefined) {
+
+          if (snapTopChanged && result.snapTop !== undefined) {
             target.set('top', result.snapTop);
+            lastSnapTop = result.snapTop;
+          } else if (result.snapTop === undefined && lastSnapTop !== undefined) {
+            // Clear last snap when no longer snapping
+            lastSnapTop = undefined;
           }
-          target.setCoords();
+
+          if (snapLeftChanged || snapTopChanged) {
+            target.setCoords();
+          }
         }
 
         // Draw alignment guides
@@ -157,6 +178,9 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     // Clear alignment guides when object stops moving
     canvas.on('object:modified', () => {
       clearAlignmentGuides(canvas);
+      resetSnapState(); // Reset snap state for next drag
+      lastSnapLeft = undefined; // Reset tracking
+      lastSnapTop = undefined;
       setDirty(true);
       setRotationAngle(null);
       setRotationPosition(null);
@@ -271,6 +295,41 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     };
   }, [width, height, onCanvasReady, onSelectionChange, setDirty]);
 
+  // Helper function to ensure boundary exists and is in the correct position
+  const ensureBoundary = (canvas: Canvas) => {
+    // Check if boundary already exists
+    const existingBoundary = canvas.getObjects().find((obj) => (obj as any).name === 'canvas-boundary');
+
+    if (existingBoundary) {
+      // Update existing boundary dimensions if needed
+      existingBoundary.set({
+        left: 0,
+        top: 0,
+        width: width * SCALE,
+        height: height * SCALE,
+      });
+      existingBoundary.setCoords();
+      canvas.sendObjectToBack(existingBoundary);
+    } else {
+      // Create new boundary if it doesn't exist
+      const boundary = new Rect({
+        left: 0,
+        top: 0,
+        width: width * SCALE,
+        height: height * SCALE,
+        fill: 'transparent',
+        stroke: '#3b82f6',
+        strokeWidth: 2,
+        selectable: false,
+        evented: false,
+        excludeFromExport: true,
+        name: 'canvas-boundary',
+      });
+      canvas.add(boundary);
+      canvas.sendObjectToBack(boundary);
+    }
+  };
+
   // Load canvas data when side changes
   useEffect(() => {
     const load = async () => {
@@ -286,21 +345,7 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
         fabricRef.current.loadFromJSON(data, () => {
           // Re-add boundary after loading
           if (fabricRef.current) {
-            const boundary = new Rect({
-              left: 0,
-              top: 0,
-              width: width * SCALE,
-              height: height * SCALE,
-              fill: 'transparent',
-              stroke: '#3b82f6',
-              strokeWidth: 2,
-              selectable: false,
-              evented: false,
-              excludeFromExport: true,
-              name: 'canvas-boundary',
-            });
-            fabricRef.current.add(boundary);
-            fabricRef.current.sendObjectToBack(boundary);
+            ensureBoundary(fabricRef.current);
             fabricRef.current.requestRenderAll();
             setDirty(false);
           }
@@ -311,21 +356,7 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
           fabricRef.current.clear();
           fabricRef.current.backgroundColor = '#ffffff';
           // Re-add boundary after clearing
-          const boundary = new Rect({
-            left: 0,
-            top: 0,
-            width: width * SCALE,
-            height: height * SCALE,
-            fill: 'transparent',
-            stroke: '#3b82f6',
-            strokeWidth: 2,
-            selectable: false,
-            evented: false,
-            excludeFromExport: true,
-            name: 'canvas-boundary',
-          });
-          fabricRef.current.add(boundary);
-          fabricRef.current.sendObjectToBack(boundary);
+          ensureBoundary(fabricRef.current);
           fabricRef.current.requestRenderAll();
           setDirty(false);
         }
@@ -358,6 +389,7 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
   }, [showStaticGuides, showCenter, showThirds, showHalves, width, height]);
 
   // Handle canvas rotation for easier editing
+  // This only rotates the VIEWPORT, not the actual objects, so saved data remains in portrait
   useEffect(() => {
     if (!fabricRef.current) return;
 
@@ -365,15 +397,14 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     const canvasHeight = height * SCALE;
 
     if (isRotated) {
-      // Rotate canvas 90 degrees clockwise for landscape editing
-      // The transformation matrix rotates around the top-left corner
-      // then translates to position correctly
+      // Rotate viewport 90° clockwise for landscape editing
+      // Objects remain in their original positions, only the view rotates
       canvas.viewportTransform = [
         0, 1, 0,           // Rotate 90° CW: x' = y
         -1, 0, canvasHeight, // y' = -x + height
       ];
     } else {
-      // Reset to normal view (identity transform)
+      // Reset to normal portrait view
       canvas.viewportTransform = [1, 0, 0, 1, 0, 0];
     }
 
