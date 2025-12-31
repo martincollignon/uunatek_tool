@@ -170,8 +170,15 @@ async def get_image(image_id: str):
 
 
 @router.get("/{project_id}/export/svg")
-async def export_svg(project_id: str, side: str = "front"):
-    """Export canvas as SVG."""
+async def export_svg(project_id: str, side: str = "front", mode: str = "preview"):
+    """
+    Export canvas as SVG.
+
+    Args:
+        project_id: Project ID
+        side: Which side to export (front, back, envelope)
+        mode: Export mode - "preview" includes canvas boundary, "plot" excludes it
+    """
     project = get_project_by_id(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -187,7 +194,9 @@ async def export_svg(project_id: str, side: str = "front"):
     if not canvas_json:
         raise HTTPException(status_code=400, detail=f"No canvas data for side: {side}")
 
-    generator = SVGGenerator(project.width_mm, project.height_mm)
+    # Include boundary for preview, exclude for plotting
+    include_boundary = (mode == "preview")
+    generator = SVGGenerator(project.width_mm, project.height_mm, include_boundary=include_boundary)
     svg_content = generator.generate(canvas_json)
 
     return Response(

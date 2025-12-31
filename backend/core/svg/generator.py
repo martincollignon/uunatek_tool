@@ -15,7 +15,7 @@ class SVGGenerator:
     # Fabric.js canvas uses 3 pixels per mm (matches frontend SCALE constant)
     PIXELS_PER_MM = 3.0
 
-    def __init__(self, width_mm: float, height_mm: float, vectorize_images: bool = False):
+    def __init__(self, width_mm: float, height_mm: float, vectorize_images: bool = False, include_boundary: bool = True):
         """
         Initialize generator.
 
@@ -23,10 +23,12 @@ class SVGGenerator:
             width_mm: Canvas width in millimeters
             height_mm: Canvas height in millimeters
             vectorize_images: If True, automatically vectorize raster images to paths
+            include_boundary: If True, include canvas boundary in output (for preview). If False, exclude it (for plotting).
         """
         self.width_mm = width_mm
         self.height_mm = height_mm
         self.vectorize_images = vectorize_images
+        self.include_boundary = include_boundary
 
     def generate(self, canvas_json: dict) -> str:
         """
@@ -46,6 +48,11 @@ class SVGGenerator:
         objects = canvas_json.get("objects", [])
 
         for obj in objects:
+            # Skip canvas boundary if not including it (for plotting)
+            obj_name = obj.get("name", "")
+            if obj_name == "canvas-boundary" and not self.include_boundary:
+                continue
+
             obj_type = obj.get("type", "")
 
             if obj_type == "path":
@@ -249,33 +256,92 @@ class SVGGenerator:
 
     def _add_text(self, dwg: svgwrite.Drawing, obj: dict):
         """
-        Add text element.
+        Add text element converted to paths.
 
-        Note: For accurate plotter output, text should be converted to paths
-        on the frontend before sending to backend.
+        Converts text to vector paths using text rendering so it can be plotted accurately.
+        """
+        try:
+            from ..svg.text_to_path import convert_text_to_path
+
+            text_content = obj.get("text", "")
+            font_family = obj.get("fontFamily", "Arial")
+            # Convert font size from pixels to mm
+            font_size = self._px_to_mm(obj.get("fontSize", 12))
+            font_weight = obj.get("fontWeight", "normal")
+            font_style = obj.get("fontStyle", "normal")
+
+            # Get transform and position
+            transform = self._get_transform(obj)
+            stroke = obj.get("stroke") or obj.get("fill", "black")
+            stroke_width = obj.get("strokeWidth", 1)
+
+            # Convert text to path
+            path_data = convert_text_to_path(
+                text_content,
+                font_family,
+                font_size,
+                font_weight,
+                font_style,
+            )
+
+            if path_data:
+                # Create path element
+                path = dwg.path(
+                    d=path_data,
+                    stroke=stroke,
+                    stroke_width=stroke_width,
+                    fill="none",
+                )
+                if transform:
+                    path.attribs["transform"] = transform
+
+                dwg.add(path)
+                logger.info(f"Text '{text_content[:20]}...' converted to path")
+            else:
+                # Fallback: add as text element with stroke
+                self._add_text_fallback(dwg, obj)
+
+        except Exception as e:
+            logger.error(f"Failed to convert text to path: {e}")
+            # Fallback to text element
+            self._add_text_fallback(dwg, obj)
+
+    def _add_text_fallback(self, dwg: svgwrite.Drawing, obj: dict):
+        """
+        Add text element as fallback when path conversion fails.
+        Uses SVG text element with stroke so plotter can trace the outline.
         """
         text_content = obj.get("text", "")
         font_family = obj.get("fontFamily", "Arial")
         # Convert font size from pixels to mm
         font_size = self._px_to_mm(obj.get("fontSize", 12))
+        font_weight = obj.get("fontWeight", "normal")
+        font_style = obj.get("fontStyle", "normal")
 
-        props = self._get_stroke_props(obj)
         transform = self._get_transform(obj)
+        stroke = obj.get("stroke") or obj.get("fill", "black")
+        stroke_width = obj.get("strokeWidth", 1)
 
-        # Basic text element (plotter can't render fonts directly)
-        # This is a placeholder - real implementation needs text-to-path conversion
+        # Create text element with stroke for plotter
         text = dwg.text(
             text_content,
             insert=(0, 0),
             font_family=font_family,
-            font_size=font_size,
-            **props,
+            font_size=f"{font_size}mm",
+            font_weight=font_weight,
+            font_style=font_style,
+            stroke=stroke,
+            stroke_width=stroke_width,
+            fill="none",  # Only stroke for plotter
         )
         if transform:
             text.attribs["transform"] = transform
 
         dwg.add(text)
-        logger.warning("Text element added - should be converted to paths for accurate plotting")
+        logger.warning(
+            f"Text element '{text_content[:20]}...' added as SVG text - "
+            "path conversion unavailable. For best plotting results, convert text to paths."
+        )
 
     def _add_image(self, dwg: svgwrite.Drawing, obj: dict):
         """
