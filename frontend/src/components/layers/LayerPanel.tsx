@@ -32,8 +32,10 @@ export function LayerPanel({ canvas, selectedObject, onSelect, onBringToFront, o
 
     const updateObjects = () => {
       const objs = canvas.getObjects();
-      // Filter out canvas boundary from layer list (but keep it visible on canvas)
-      const filteredObjs = objs.filter(obj => (obj as any).name !== 'canvas-boundary');
+      // Filter out canvas boundary and safety boundary from layer list (but keep them visible on canvas)
+      const filteredObjs = objs.filter(obj =>
+        (obj as any).name !== 'canvas-boundary' && (obj as any).name !== 'safety-boundary'
+      );
       setObjects([...filteredObjs].reverse()); // Reverse so top layer is first
     };
 

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { CanvasSide } from '../types';
-import { canvasApi } from '../services/api';
+import * as projectDB from '../services/projectDB';
 
 // Save queue to prevent overlapping saves
 interface SaveQueueItem {
@@ -63,7 +63,8 @@ async function processSaveQueue(getState: () => CanvasState, setState: (partial:
   // Process each unique save
   for (const [_, item] of Array.from(uniqueSaves.entries())) {
     try {
-      await canvasApi.save(item.projectId, item.canvasJson, item.side);
+      // Use IndexedDB instead of API
+      await projectDB.saveCanvas(item.projectId, item.canvasJson, item.side as 'front' | 'back');
 
       // Update state on successful save
       setState({
@@ -97,7 +98,7 @@ async function processSaveQueue(getState: () => CanvasState, setState: (partial:
         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
       } else {
         // Max retries exceeded
-        const errorMessage = err?.response?.status === 404
+        const errorMessage = err?.message === 'Project not found'
           ? 'Project not found'
           : 'Failed to save canvas';
 
@@ -135,15 +136,15 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   loadCanvas: async (projectId, side) => {
     set({ isLoading: true, error: null });
     try {
-      const response = await canvasApi.get(projectId, side);
-      const data = response.canvas_json;
+      // Use IndexedDB instead of API
+      const data = await projectDB.getCanvas(projectId, side as 'front' | 'back');
       set((state) => ({
         canvasData: { ...state.canvasData, [side]: data },
         isLoading: false,
       }));
       return data;
     } catch (err: any) {
-      const errorMessage = err?.response?.status === 404
+      const errorMessage = err?.message === 'Project not found'
         ? 'Canvas not found'
         : 'Failed to load canvas';
       set({ error: errorMessage, isLoading: false });

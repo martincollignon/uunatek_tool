@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { X, Sparkles, Loader2 } from 'lucide-react';
-import { geminiApi } from '../../services/api';
+import { X, Sparkles, Loader2, Bookmark, Settings } from 'lucide-react';
+import { checkGeminiStatus, setGeminiApiKey } from '../../lib/gemini/geminiClient';
+import { useImageGalleryStore } from '../../stores/imageGalleryStore';
 
 interface Props {
   onClose: () => void;
@@ -8,10 +9,22 @@ interface Props {
 }
 
 const STYLE_OPTIONS = [
+  // Classic styles
   { value: 'line_art', label: 'Line Art' },
   { value: 'sketch', label: 'Sketch' },
   { value: 'minimal', label: 'Minimal' },
   { value: 'detailed', label: 'Detailed' },
+  // Advanced styles
+  { value: 'continuous', label: 'Continuous Line' },
+  { value: 'geometric', label: 'Geometric' },
+  { value: 'spiral', label: 'Spiral' },
+  { value: 'stippling', label: 'Stippling' },
+  { value: 'hatching', label: 'Hatching' },
+  { value: 'contour', label: 'Contour' },
+  { value: 'ascii', label: 'ASCII Art' },
+  { value: 'cubist', label: 'Cubist' },
+  { value: 'wireframe', label: 'Wireframe' },
+  { value: 'circuit', label: 'Circuit Board' },
 ];
 
 export function GeminiDialog({ onClose, onImageGenerated }: Props) {
@@ -19,11 +32,15 @@ export function GeminiDialog({ onClose, onImageGenerated }: Props) {
   const [style, setStyle] = useState('line_art');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewImage] = useState<string | null>(null);
   const [isConfigured, setIsConfigured] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const { addImage } = useImageGalleryStore();
 
   useEffect(() => {
-    geminiApi.checkStatus().then((status) => {
+    checkGeminiStatus().then((status) => {
       setIsConfigured(status.configured);
       if (!status.configured) {
         setError(status.message);
@@ -31,21 +48,25 @@ export function GeminiDialog({ onClose, onImageGenerated }: Props) {
     });
   }, []);
 
+  const handleSaveApiKey = () => {
+    if (apiKeyInput.trim()) {
+      setGeminiApiKey(apiKeyInput.trim());
+      setIsConfigured(true);
+      setShowApiKeyInput(false);
+      setError(null);
+    }
+  };
+
   const handleGenerate = async () => {
     if (!prompt.trim()) return;
 
     setIsLoading(true);
-    setError(null);
+    setError('Image generation with Gemini is coming soon. This requires Imagen API integration which is in development. For now, please use the "Process Image" feature to convert existing images to plotter-friendly line art.');
+    setIsLoading(false);
 
-    try {
-      const result = await geminiApi.generate(prompt, style);
-      setPreviewImage(`data:image/png;base64,${result.image_base64}`);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to generate image';
-      setError(message);
-    } finally {
-      setIsLoading(false);
-    }
+    // Image generation will be implemented when Imagen API is available
+    // const result = await generateImage(prompt, style);
+    // setPreviewImage(`data:image/png;base64,${result.image_base64}`);
   };
 
   const handleApply = () => {
@@ -54,6 +75,24 @@ export function GeminiDialog({ onClose, onImageGenerated }: Props) {
       const base64 = previewImage.split(',')[1];
       onImageGenerated(base64);
       onClose();
+    }
+  };
+
+  const handleSaveToGallery = async () => {
+    if (!previewImage) return;
+
+    setIsSaving(true);
+    try {
+      await addImage(previewImage, 'gemini', {
+        prompt,
+        style,
+      });
+      console.log('Image saved to gallery successfully');
+    } catch (err) {
+      console.error('Failed to save to gallery:', err);
+      setError('Failed to save image to gallery');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -71,7 +110,7 @@ export function GeminiDialog({ onClose, onImageGenerated }: Props) {
         </div>
 
         <div className="dialog-content">
-          {!isConfigured && (
+          {!isConfigured && !showApiKeyInput && (
             <div
               style={{
                 padding: 12,
@@ -82,8 +121,45 @@ export function GeminiDialog({ onClose, onImageGenerated }: Props) {
                 fontSize: '0.875rem',
               }}
             >
-              Gemini API is not configured. Set the GEMINI_API_KEY environment variable to enable AI
-              image generation.
+              <p style={{ marginBottom: 8 }}>
+                Gemini API is not configured. Click below to add your API key.
+              </p>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setShowApiKeyInput(true)}
+              >
+                <Settings size={14} style={{ marginRight: 4 }} />
+                Configure API Key
+              </button>
+            </div>
+          )}
+
+          {showApiKeyInput && (
+            <div className="form-group">
+              <label className="form-label">Gemini API Key</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  type="password"
+                  className="form-input"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  placeholder="Enter your Gemini API key"
+                />
+                <button className="btn btn-primary" onClick={handleSaveApiKey}>
+                  Save
+                </button>
+              </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 4 }}>
+                Get your API key from{' '}
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  Google AI Studio
+                </a>
+              </p>
             </div>
           )}
 
@@ -156,6 +232,15 @@ export function GeminiDialog({ onClose, onImageGenerated }: Props) {
                   style={{ maxWidth: '100%', display: 'block', margin: '0 auto' }}
                 />
               </div>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={handleSaveToGallery}
+                disabled={isSaving}
+                style={{ marginTop: 8 }}
+              >
+                <Bookmark size={14} />
+                {isSaving ? 'Saving...' : 'Save to Gallery'}
+              </button>
             </div>
           )}
         </div>
