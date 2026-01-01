@@ -5,11 +5,66 @@ import tempfile
 import logging
 import sys
 import os
+import re
 from pathlib import Path
 from PIL import Image
 import io
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_svg_stroke_widths(svg_content: str, target_width: float = 0.5) -> str:
+    """
+    Normalize all stroke widths in SVG to a consistent thin width suitable for pen plotting.
+
+    Args:
+        svg_content: SVG content as string
+        target_width: Target stroke width in mm (default: 0.5mm for fine pen)
+
+    Returns:
+        Modified SVG content with normalized stroke widths
+    """
+    # Replace stroke-width attributes with consistent value
+    # Match both stroke-width="X" and stroke-width='X' patterns
+    svg_content = re.sub(
+        r'stroke-width=["\'][\d.]+["\']',
+        f'stroke-width="{target_width}"',
+        svg_content
+    )
+
+    # Also handle style attributes that contain stroke-width
+    def replace_style_stroke_width(match):
+        style = match.group(1)
+        # Replace stroke-width value in style string
+        style = re.sub(
+            r'stroke-width:\s*[\d.]+(?:px|pt|mm)?',
+            f'stroke-width:{target_width}mm',
+            style
+        )
+        return f'style="{style}"'
+
+    svg_content = re.sub(
+        r'style="([^"]*)"',
+        replace_style_stroke_width,
+        svg_content
+    )
+
+    # If no stroke-width is specified at all, add it to path elements
+    # This handles SVGs that rely on default stroke width
+    lines = svg_content.split('\n')
+    processed_lines = []
+
+    for line in lines:
+        # If line contains <path and doesn't have stroke-width, add it
+        if '<path' in line and 'stroke-width' not in line:
+            # Add stroke-width before the closing >
+            line = line.replace('>', f' stroke-width="{target_width}">', 1)
+        processed_lines.append(line)
+
+    svg_content = '\n'.join(processed_lines)
+
+    logger.info(f"Normalized SVG stroke widths to {target_width}mm")
+    return svg_content
 
 
 def find_potrace():
@@ -54,6 +109,8 @@ class ImageVectorizer:
                 - turnpolicy: Turn policy (black, white, left, right, minority, majority, random)
                 - alphamax: Corner threshold (default: 1.0)
                 - opttolerance: Curve optimization tolerance (default: 0.2)
+                - normalize_stroke_width: Target stroke width in mm (default: 0.5mm)
+                - skip_normalize: If True, skip stroke width normalization (default: False)
 
         Returns:
             SVG content as string
@@ -115,6 +172,11 @@ class ImageVectorizer:
 
                 if not svg_content:
                     raise RuntimeError("Potrace returned empty SVG")
+
+                # Normalize stroke widths unless explicitly skipped
+                if not options.get('skip_normalize', False):
+                    target_width = options.get('normalize_stroke_width', 0.5)
+                    svg_content = normalize_svg_stroke_widths(svg_content, target_width)
 
                 logger.info(f"Vectorization successful: {len(svg_content)} bytes")
                 return svg_content
