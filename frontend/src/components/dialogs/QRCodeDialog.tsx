@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, QrCode, Loader2 } from 'lucide-react';
-import { qrcodeApi } from '../../services/api';
+import { generateQRCode } from '../../lib/qrcode/qrcodeGenerator';
 
 interface Props {
   onClose: () => void;
@@ -32,7 +32,7 @@ export function QRCodeDialog({ onClose, onSvgGenerated }: Props) {
     setError(null);
 
     try {
-      const result = await qrcodeApi.generate(content, errorCorrection, sizeMm);
+      const result = await generateQRCode(content, errorCorrection, sizeMm);
       setPreviewSvg(result.svg);
       setDimensions({ width: result.width_mm, height: result.height_mm });
     } catch (err: unknown) {

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Play, Type, Image, Layers, Trash2, Sparkles, QrCode, Square, ChevronDown, ZoomIn, ZoomOut, Maximize2, Grid3x3, RotateCw, Undo2, Redo2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Save, Play, Type, Image, Layers, Trash2, Sparkles, QrCode, MapPin, Square, ChevronDown, ZoomIn, ZoomOut, Maximize2, Grid3x3, RotateCw, Undo2, Redo2, AlertTriangle, RefreshCw, FolderOpen, Circle, Minus, Frame } from 'lucide-react';
 import { Canvas, FabricObject, FabricImage, loadSVGFromString, util } from 'fabric';
 import { useProjectStore } from '../stores/projectStore';
 import { useCanvasStore } from '../stores/canvasStore';
@@ -13,8 +13,10 @@ import { validateImageFile, fileToDataURL, needsConversion } from '../utils/imag
 
 const GeminiDialog = lazy(() => import('../components/dialogs/GeminiDialog').then(m => ({ default: m.GeminiDialog })));
 const QRCodeDialog = lazy(() => import('../components/dialogs/QRCodeDialog').then(m => ({ default: m.QRCodeDialog })));
+const MapDialog = lazy(() => import('../components/dialogs/MapDialog').then(m => ({ default: m.MapDialog })));
 const FrameGalleryDialog = lazy(() => import('../components/dialogs/FrameGalleryDialog').then(m => ({ default: m.FrameGalleryDialog })));
 const ImageProcessDialog = lazy(() => import('../components/dialogs/ImageProcessDialog'));
+const ImageGalleryDialog = lazy(() => import('../components/dialogs/ImageGalleryDialog').then(m => ({ default: m.ImageGalleryDialog })));
 import { createSimpleFrame, createDoubleFrame, createRoundedFrame, createOvalFrame } from '../utils/frameGenerator';
 import { useCanvasOperations } from '../hooks/useCanvasOperations';
 import { useCanvasSave } from '../hooks/useCanvasSave';
@@ -55,11 +57,17 @@ export function EditorPage() {
   const [selectedObject, setSelectedObject] = useState<FabricObject | null>(null);
   const [showGeminiDialog, setShowGeminiDialog] = useState(false);
   const [showQRCodeDialog, setShowQRCodeDialog] = useState(false);
+  const [showMapDialog, setShowMapDialog] = useState(false);
   const [showFrameGalleryDialog, setShowFrameGalleryDialog] = useState(false);
   const [showImageProcessDialog, setShowImageProcessDialog] = useState(false);
+  const [showGalleryDialog, setShowGalleryDialog] = useState(false);
   const [pendingImageDataUrl, setPendingImageDataUrl] = useState<string | null>(null);
   const [frameMenuOpen, setFrameMenuOpen] = useState(false);
+  const [rectangleMenuOpen, setRectangleMenuOpen] = useState(false);
+  const [circleMenuOpen, setCircleMenuOpen] = useState(false);
   const frameMenuRef = useRef<HTMLDivElement>(null);
+  const rectangleMenuRef = useRef<HTMLDivElement>(null);
+  const circleMenuRef = useRef<HTMLDivElement>(null);
   const [zoomControls, setZoomControls] = useState<ZoomControls | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [viewportOffset, setViewportOffset] = useState({ x: 0, y: 0 });
@@ -103,15 +111,35 @@ export function EditorPage() {
       if (frameMenuRef.current && !frameMenuRef.current.contains(event.target as Node)) {
         setFrameMenuOpen(false);
       }
+      if (rectangleMenuRef.current && !rectangleMenuRef.current.contains(event.target as Node)) {
+        setRectangleMenuOpen(false);
+      }
+      if (circleMenuRef.current && !circleMenuRef.current.contains(event.target as Node)) {
+        setCircleMenuOpen(false);
+      }
     };
-    if (frameMenuOpen) {
+    if (frameMenuOpen || rectangleMenuOpen || circleMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
-  }, [frameMenuOpen]);
+  }, [frameMenuOpen, rectangleMenuOpen, circleMenuOpen]);
 
   const handleAddText = () => {
     canvasOps.addText();
+  };
+
+  const handleAddRectangle = (fillType: 'none' | 'horizontal-lines' | 'vertical-lines' | 'diagonal-lines' | 'cross-hatch' | 'dots' = 'none') => {
+    canvasOps.addRectangle(fillType);
+    setRectangleMenuOpen(false);
+  };
+
+  const handleAddCircle = (fillType: 'none' | 'horizontal-lines' | 'vertical-lines' | 'diagonal-lines' | 'cross-hatch' | 'dots' = 'none') => {
+    canvasOps.addCircle(fillType);
+    setCircleMenuOpen(false);
+  };
+
+  const handleAddLine = () => {
+    canvasOps.addLine();
   };
 
   const handleAddImage = async () => {
@@ -259,6 +287,17 @@ export function EditorPage() {
       if (projectId) {
         await handleSave();
       }
+    }
+  };
+
+  const handleMapGenerated = async (svg: string, widthMm: number, heightMm: number) => {
+    if (!fabricCanvas || !canvasOps) return;
+
+    await canvasOps.addMapSvg(svg, widthMm, heightMm);
+
+    // Auto-save after adding map to ensure preview shows it
+    if (projectId) {
+      await handleSave();
     }
   };
 
@@ -453,8 +492,84 @@ export function EditorPage() {
           <button className="btn btn-secondary btn-icon" onClick={handleAddText} title="Add Text">
             <Type size={18} />
           </button>
+
+          {/* Rectangle with fill options */}
+          <div className="dropdown-container" ref={rectangleMenuRef}>
+            <button
+              className="btn btn-secondary btn-icon-with-text"
+              onClick={() => setRectangleMenuOpen(!rectangleMenuOpen)}
+              title="Add Rectangle"
+            >
+              <Square size={18} />
+              <ChevronDown size={14} />
+            </button>
+            {rectangleMenuOpen && (
+              <div className="dropdown-menu">
+                <button className="dropdown-item" onClick={() => handleAddRectangle('none')}>
+                  Outline Only
+                </button>
+                <button className="dropdown-item" onClick={() => handleAddRectangle('horizontal-lines')}>
+                  Horizontal Lines
+                </button>
+                <button className="dropdown-item" onClick={() => handleAddRectangle('vertical-lines')}>
+                  Vertical Lines
+                </button>
+                <button className="dropdown-item" onClick={() => handleAddRectangle('diagonal-lines')}>
+                  Diagonal Lines
+                </button>
+                <button className="dropdown-item" onClick={() => handleAddRectangle('cross-hatch')}>
+                  Cross-Hatch
+                </button>
+                <button className="dropdown-item" onClick={() => handleAddRectangle('dots')}>
+                  Dots
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Circle with fill options */}
+          <div className="dropdown-container" ref={circleMenuRef}>
+            <button
+              className="btn btn-secondary btn-icon-with-text"
+              onClick={() => setCircleMenuOpen(!circleMenuOpen)}
+              title="Add Circle"
+            >
+              <Circle size={18} />
+              <ChevronDown size={14} />
+            </button>
+            {circleMenuOpen && (
+              <div className="dropdown-menu">
+                <button className="dropdown-item" onClick={() => handleAddCircle('none')}>
+                  Outline Only
+                </button>
+                <button className="dropdown-item" onClick={() => handleAddCircle('horizontal-lines')}>
+                  Horizontal Lines
+                </button>
+                <button className="dropdown-item" onClick={() => handleAddCircle('vertical-lines')}>
+                  Vertical Lines
+                </button>
+                <button className="dropdown-item" onClick={() => handleAddCircle('cross-hatch')}>
+                  Cross-Hatch
+                </button>
+                <button className="dropdown-item" onClick={() => handleAddCircle('dots')}>
+                  Dots
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button className="btn btn-secondary btn-icon" onClick={handleAddLine} title="Add Line">
+            <Minus size={18} />
+          </button>
           <button className="btn btn-secondary btn-icon" onClick={handleAddImage} title="Add Image">
             <Image size={18} />
+          </button>
+          <button
+            className="btn btn-secondary btn-icon"
+            onClick={() => setShowGalleryDialog(true)}
+            title="Browse Image Gallery"
+          >
+            <FolderOpen size={18} />
           </button>
           <button
             className="btn btn-secondary btn-icon"
@@ -470,6 +585,13 @@ export function EditorPage() {
           >
             <QrCode size={18} />
           </button>
+          <button
+            className="btn btn-secondary btn-icon"
+            onClick={() => setShowMapDialog(true)}
+            title="Import Map"
+          >
+            <MapPin size={18} />
+          </button>
 
           <div className="dropdown-container" ref={frameMenuRef}>
             <button
@@ -477,7 +599,7 @@ export function EditorPage() {
               onClick={() => setFrameMenuOpen(!frameMenuOpen)}
               title="Add Frame"
             >
-              <Square size={18} />
+              <Frame size={18} />
               <ChevronDown size={14} />
             </button>
             {frameMenuOpen && (
@@ -632,6 +754,7 @@ export function EditorPage() {
               zoom={zoomLevel}
               offset={viewportOffset}
               pixelsPerMm={3}
+              isRotated={isRotated}
             />
           </div>
 
@@ -651,6 +774,7 @@ export function EditorPage() {
               zoom={zoomLevel}
               offset={viewportOffset}
               pixelsPerMm={3}
+              isRotated={isRotated}
             />
           </div>
 
@@ -677,6 +801,7 @@ export function EditorPage() {
                 canvasHeightMm={currentProject.height_mm}
                 pixelsPerMm={3}
                 zoom={zoomLevel}
+                isRotated={isRotated}
               />
             )}
           </div>
@@ -905,15 +1030,91 @@ export function EditorPage() {
                     onChange={(e) => {
                       (selectedObject as any).set('fill', e.target.value);
                       fabricCanvas?.requestRenderAll();
+                      setDirty(true);
                     }}
                     style={{ height: '40px', padding: '4px' }}
                   />
                 </div>
+                <div className="form-group">
+                  <label className="form-label">Border Color</label>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="color"
+                      value={(selectedObject as any).stroke || '#000000'}
+                      onChange={(e) => {
+                        (selectedObject as any).set('stroke', e.target.value);
+                        fabricCanvas?.requestRenderAll();
+                        setDirty(true);
+                      }}
+                      style={{ width: '50px', height: '38px', cursor: 'pointer', border: '1px solid var(--color-border)', borderRadius: '4px' }}
+                    />
+                    <input
+                      type="text"
+                      value={(selectedObject as any).stroke || '#000000'}
+                      onChange={(e) => {
+                        (selectedObject as any).set('stroke', e.target.value);
+                        fabricCanvas?.requestRenderAll();
+                        setDirty(true);
+                      }}
+                      placeholder="#000000"
+                      style={{
+                        flex: 1,
+                        padding: '4px 8px',
+                        fontSize: '0.875rem',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: '4px',
+                        backgroundColor: 'var(--color-bg)',
+                        color: 'var(--color-text)'
+                      }}
+                    />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Border Width</label>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="range"
+                      min="0"
+                      max="10"
+                      step="0.5"
+                      value={(selectedObject as any).strokeWidth || 0}
+                      onChange={(e) => {
+                        const newWidth = parseFloat(e.target.value) || 0;
+                        (selectedObject as any).set('strokeWidth', newWidth);
+                        fabricCanvas?.requestRenderAll();
+                        setDirty(true);
+                      }}
+                      style={{ flex: 1 }}
+                    />
+                    <input
+                      type="number"
+                      value={(selectedObject as any).strokeWidth || 0}
+                      onChange={(e) => {
+                        const newWidth = parseFloat(e.target.value) || 0;
+                        (selectedObject as any).set('strokeWidth', newWidth);
+                        fabricCanvas?.requestRenderAll();
+                        setDirty(true);
+                      }}
+                      min="0"
+                      max="10"
+                      step="0.5"
+                      style={{
+                        width: '70px',
+                        padding: '4px 8px',
+                        fontSize: '0.875rem',
+                        border: '1px solid var(--color-border)',
+                        borderRadius: '4px',
+                        backgroundColor: 'var(--color-bg)',
+                        color: 'var(--color-text)'
+                      }}
+                    />
+                  </div>
+                </div>
               </>
             )}
 
-            {/* Stroke properties for rect/path objects (simple borders) */}
-            {(selectedObject.type === 'rect' || selectedObject.type === 'path') && (
+            {/* Stroke properties for rect/circle/line/path objects (simple shapes) */}
+            {(selectedObject.type === 'rect' || selectedObject.type === 'circle' || selectedObject.type === 'line' || selectedObject.type === 'path') && (
               <>
                 <div className="form-group">
                   <label className="form-label">Stroke Color</label>
@@ -1318,6 +1519,18 @@ export function EditorPage() {
         </Suspense>
       )}
 
+      {/* Map Dialog */}
+      {showMapDialog && currentProject && (
+        <Suspense fallback={<DialogLoadingFallback />}>
+          <MapDialog
+            onClose={() => setShowMapDialog(false)}
+            onSvgGenerated={handleMapGenerated}
+            maxWidthMm={currentProject.width_mm}
+            maxHeightMm={currentProject.height_mm}
+          />
+        </Suspense>
+      )}
+
       {/* Frame Gallery Dialog */}
       {showFrameGalleryDialog && currentProject && (
         <Suspense fallback={<DialogLoadingFallback />}>
@@ -1342,6 +1555,17 @@ export function EditorPage() {
             }}
             imageDataUrl={pendingImageDataUrl}
             onAddToCanvas={handleAddImageToCanvas}
+          />
+        </Suspense>
+      )}
+
+      {/* Image Gallery Dialog */}
+      {showGalleryDialog && (
+        <Suspense fallback={<DialogLoadingFallback />}>
+          <ImageGalleryDialog
+            open={showGalleryDialog}
+            onClose={() => setShowGalleryDialog(false)}
+            onImageSelected={handleAddImageToCanvas}
           />
         </Suspense>
       )}

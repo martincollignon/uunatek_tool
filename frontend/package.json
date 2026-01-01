@@ -7,22 +7,32 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext ts,tsx"
+    "lint": "eslint . --ext ts,tsx",
+    "tauri": "export PATH=\"$HOME/.cargo/bin:$PATH\" && tauri",
+    "tauri:dev": "export PATH=\"$HOME/.cargo/bin:$PATH\" && tauri dev",
+    "tauri:build": "export PATH=\"$HOME/.cargo/bin:$PATH\" && tauri build",
+    "tauri:build:with-key": "export PATH=\"$HOME/.cargo/bin:$PATH\" && cd \"$(pwd)\" && [ -f .env ] && export $(cat .env | grep -v '^#' | xargs) && tauri build || (echo 'Error: .env not found in frontend directory' && exit 1)"
   },
   "dependencies": {
     "@types/react-window": "^1.8.8",
     "axios": "^1.13.2",
-    "fabric": "^6.5.3",
+    "fabric": "^7.1.0",
+    "idb": "^8.0.3",
+    "leaflet": "^1.9.4",
     "lucide-react": "^0.562.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-leaflet": "^4.2.1",
     "react-router-dom": "^7.11.0",
     "react-window": "^2.2.3",
+    "tauri-plugin-serialplugin": "^2.17.1",
     "zustand": "^5.0.9"
   },
   "devDependencies": {
-    "@types/react": "^18.3.18",
-    "@types/react-dom": "^18.3.5",
+    "@tauri-apps/cli": "^2.9.6",
+    "@types/leaflet": "^1.9.14",
+    "@types/react": "^19.2.3",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.2",
     "typescript": "^5.9.3",
     "vite": "^7.3.0"
