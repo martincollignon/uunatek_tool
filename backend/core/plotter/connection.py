@@ -1,4 +1,17 @@
-"""Serial connection management for EBB-based plotters (iDraw 2.0)."""
+"""Serial connection management for GRBL-based plotters (iDraw 2.0 with DrawCore).
+
+This module handles serial communication with the iDraw 2.0 pen plotter using
+the DrawCore firmware (GRBL-based). It supports both GRBL and legacy EBB protocols.
+
+GRBL Response Formats:
+- "ok" - Command accepted
+- "error:X" - Error with code X
+- "<Idle|MPos:...>" - Status query response
+- "ALARM:X" - Alarm triggered
+
+References:
+- https://github.com/gnea/grbl/wiki/Grbl-v1.1-Commands
+"""
 
 import asyncio
 import serial
@@ -14,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class PlotterConnection:
-    """Manage serial connection to EBB-based plotter."""
+    """Manage serial connection to GRBL-based plotter (iDraw 2.0 with DrawCore)."""
 
     # USB identifiers for supported devices
     SUPPORTED_DEVICES = [
@@ -126,10 +139,23 @@ class PlotterConnection:
                 )
                 self._port_name = port
 
-                # Verify connection with version query
+                # Verify connection - try GRBL $I first, then fall back to EBB V
                 try:
-                    version = await self._send_command_locked("V", timeout=3.0)
+                    # Try GRBL identification first
+                    version = await self._send_command_locked("$I", timeout=3.0)
                     if not version:
+                        # Fall back to EBB version command
+                        version = await self._send_command_locked("V", timeout=3.0)
+                    if not version:
+                        self._serial.close()
+                        self._serial = None
+                        self._port_name = None
+                        raise PlotterError("PLT-C005", context={"port": port})
+                except PlotterError:
+                    # If $I fails, try V command (for EBB compatibility)
+                    try:
+                        version = await self._send_command_locked("V", timeout=3.0)
+                    except Exception:
                         self._serial.close()
                         self._serial = None
                         self._port_name = None
@@ -192,24 +218,42 @@ class PlotterConnection:
             return await self._send_command_locked(command, timeout)
 
     async def _send_command_locked(self, command: str, timeout: float = 5.0) -> str:
-        """Send command (must hold lock)."""
+        """Send command (must hold lock).
+
+        Supports both GRBL and EBB response formats:
+        - GRBL: "ok", "error:X", "<State|...>", "ALARM:X"
+        - EBB: ends with "\\r\\n" or "OK\\r\\n"
+        """
         if not self._serial or not self._serial.is_open:
             raise PlotterError("PLT-C004", context={"command": command})
+
+        # Determine command type for response parsing
+        is_grbl_status_query = command == "?"
+        is_grbl_realtime = command in ["?", "!", "~", "\x18"]  # Real-time commands don't need newline
+        is_grbl_command = command.startswith("$") or command.startswith("G") or command.startswith("M") or is_grbl_realtime
 
         try:
             # Clear any pending input
             self._serial.reset_input_buffer()
 
-            # Send command with carriage return
-            cmd_bytes = f"{command}\r".encode("ascii")
+            # Send command with appropriate line ending
+            # Real-time commands (?, !, ~) don't need terminator
+            # GRBL uses \n, EBB uses \r
+            if is_grbl_realtime:
+                cmd_bytes = command.encode("ascii")
+            elif is_grbl_command:
+                cmd_bytes = f"{command}\n".encode("ascii")
+            else:
+                cmd_bytes = f"{command}\r".encode("ascii")
             self._serial.write(cmd_bytes)
-            logger.debug(f"Sent: {command}")
+            logger.debug(f"Sent: {repr(command)}")
 
         except serial.SerialException as e:
             # Device disconnected during write
+            logger.error(f"Serial exception during write. Command: {command}, Error: {e}")
             self._serial = None
             self._port_name = None
-            raise PlotterError("PLT-C004", context={"command": command, "phase": "write"}, cause=e)
+            raise PlotterError("PLT-C004", context={"command": command, "phase": "write", "error": str(e)}, cause=e)
         except OSError as e:
             # Handle OS-level disconnection errors
             if e.errno in (errno.EIO, errno.ENODEV, errno.ENOENT):
@@ -228,21 +272,47 @@ class PlotterConnection:
                     chunk = self._serial.read(self._serial.in_waiting).decode("ascii", errors="ignore")
                     response += chunk
 
-                    # Check for complete response
-                    if response.endswith("\r\n") or "OK\r\n" in response:
-                        break
+                    # Check for complete response based on protocol
+                    response_lower = response.lower()
+                    response_stripped = response.rstrip()
+
+                    # GRBL response patterns
+                    if is_grbl_status_query:
+                        # Status query ends with ">"
+                        if response_stripped.endswith(">"):
+                            break
+                    elif is_grbl_command:
+                        # GRBL commands end with "ok" or "error:X"
+                        if "ok" in response_lower:
+                            break
+                        if "error:" in response_lower:
+                            break
+                        if "alarm:" in response_lower:
+                            break
+                        # Some GRBL responses end with newline
+                        if response.endswith("\n") and len(response_stripped) > 0:
+                            # Check if we have a complete multi-line response
+                            lines = response_stripped.split("\n")
+                            last_line = lines[-1].lower().strip()
+                            if last_line == "ok" or last_line.startswith("error:"):
+                                break
+                    else:
+                        # EBB response handling (legacy)
+                        if response.endswith("\r\n") or "OK\r\n" in response:
+                            break
 
                 elapsed = asyncio.get_event_loop().time() - start_time
                 if elapsed > timeout:
-                    raise PlotterError("PLT-X001", context={"command": command, "timeout": timeout})
+                    raise PlotterError("PLT-X001", context={"command": command, "timeout": timeout, "partial_response": response})
 
                 await asyncio.sleep(0.01)
 
         except serial.SerialException as e:
             # Device disconnected during read
+            logger.error(f"Serial exception during read. Command: {command}, Error: {e}")
             self._serial = None
             self._port_name = None
-            raise PlotterError("PLT-C004", context={"command": command, "phase": "read"}, cause=e)
+            raise PlotterError("PLT-C004", context={"command": command, "phase": "read", "error": str(e)}, cause=e)
         except OSError as e:
             # Handle OS-level disconnection errors
             if e.errno in (errno.EIO, errno.ENODEV, errno.ENOENT):
@@ -255,21 +325,36 @@ class PlotterConnection:
         logger.debug(f"Received: {response}")
 
         # Check for rejection/error responses
+        # EBB error format
         if response.startswith("!"):
             raise PlotterError("PLT-X003", context={"command": command, "response": response})
+
+        # GRBL error format is handled by the caller (grbl_commands.py)
+        # We don't raise here because error responses are valid responses that need parsing
 
         return response
 
     async def send_command_no_response(self, command: str):
-        """Send command without waiting for response (for motion commands)."""
+        """Send command without waiting for response.
+
+        Used for real-time commands like GRBL feed hold (!) and soft reset (Ctrl-X).
+        """
         async with self._lock:
             if not self._serial or not self._serial.is_open:
                 raise PlotterError("PLT-C004", context={"command": command})
 
             try:
-                cmd_bytes = f"{command}\r".encode("ascii")
+                # Real-time commands (!, ~, ?) don't need line ending
+                # Regular commands need appropriate terminator
+                if command in ["!", "~", "?", "\x18"]:
+                    cmd_bytes = command.encode("ascii")
+                else:
+                    # Use \n for GRBL commands, \r for EBB
+                    is_grbl = command.startswith("$") or command.startswith("G") or command.startswith("M")
+                    terminator = "\n" if is_grbl else "\r"
+                    cmd_bytes = f"{command}{terminator}".encode("ascii")
                 self._serial.write(cmd_bytes)
-                logger.debug(f"Sent (no wait): {command}")
+                logger.debug(f"Sent (no wait): {repr(command)}")
             except serial.SerialException as e:
                 self._serial = None
                 self._port_name = None

@@ -1,45 +1,37 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Save, Play, Type, Image, Layers, Trash2, Sparkles, QrCode, Square, ChevronDown, ZoomIn, ZoomOut, Maximize2, Grid3x3, RotateCw } from 'lucide-react';
-import { Canvas, FabricObject, IText, FabricImage, util, loadSVGFromString } from 'fabric';
+import { Save, Play, Type, Image, Layers, Trash2, Sparkles, QrCode, Square, ChevronDown, ZoomIn, ZoomOut, Maximize2, Grid3x3, RotateCw, Undo2, Redo2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Canvas, FabricObject, FabricImage, loadSVGFromString, util } from 'fabric';
 import { useProjectStore } from '../stores/projectStore';
 import { useCanvasStore } from '../stores/canvasStore';
 import { useAlignmentGuidesStore } from '../stores/alignmentGuidesStore';
 import { FabricCanvas, ZoomControls } from '../components/canvas/FabricCanvas';
-import { LayerPanel } from '../components/canvas/LayerPanel';
+import { LayerPanel } from '../components/layers/LayerPanel';
+import { SaveIndicator } from '../components/SaveIndicator';
 import { GeminiDialog } from '../components/dialogs/GeminiDialog';
 import { QRCodeDialog } from '../components/dialogs/QRCodeDialog';
 import { FrameGalleryDialog } from '../components/dialogs/FrameGalleryDialog';
 import ImageProcessDialog from '../components/dialogs/ImageProcessDialog';
 import { validateImageFile, fileToDataURL, needsConversion } from '../utils/imageUtils';
 import { createSimpleFrame, createDoubleFrame, createRoundedFrame, createOvalFrame } from '../utils/frameGenerator';
-import {
-  createPolkaDotFill,
-  createDiagonalStripeFill,
-  createChevronFill,
-  createCheckerboardFill,
-  createGraphGridFill,
-  createPlusGridFill,
-  createSquiggleFill,
-} from '../utils/fillPatterns';
+import { useCanvasOperations } from '../hooks/useCanvasOperations';
+import { useCanvasSave } from '../hooks/useCanvasSave';
+import { useCanvasSelection } from '../hooks/useCanvasSelection';
+import { usePatternGeneration } from '../hooks/usePatternGeneration';
+import { useEditorUX } from '../hooks/useEditorUX';
+import { ContextMenu } from '../components/canvas/ContextMenu';
+import { AlignmentToolbar } from '../components/toolbar/AlignmentToolbar';
 import type { CanvasSide } from '../types';
-
-// Map pattern IDs to their creation functions
-const FILL_PATTERN_CREATORS: Record<string, (options: any) => any> = {
-  'polkadot': createPolkaDotFill,
-  'diagonal': createDiagonalStripeFill,
-  'chevron-fill': createChevronFill,
-  'checkerboard': createCheckerboardFill,
-  'graph': createGraphGridFill,
-  'plus': createPlusGridFill,
-  'squiggle': createSquiggleFill,
-};
+import { ErrorBoundary, InlineErrorBoundary } from '../components/ErrorBoundary';
+import { CanvasSkeleton, LayerPanelSkeleton, PropertiesPanelSkeleton } from '../components/skeletons';
+import { GridControls, GridOverlay } from '../components/canvas/GridOverlay';
+import { Ruler } from '../components/canvas/Ruler';
 
 export function EditorPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { currentProject, loadProject, isLoading: projectLoading } = useProjectStore();
-  const { currentSide, setSide, saveCanvas, isDirty, setDirty, isRotated, setRotated } = useCanvasStore();
+  const { currentSide, setSide, isDirty, setDirty, isRotated, setRotated } = useCanvasStore();
   const {
     showStaticGuides,
     showSmartGuides,
@@ -47,12 +39,14 @@ export function EditorPage() {
     showThirds,
     showHalves,
     snapToGuides,
+    gridConfig,
     toggleStaticGuides,
     toggleSmartGuides,
     toggleCenter,
     toggleThirds,
     toggleHalves,
     toggleSnapToGuides,
+    setGridConfig,
   } = useAlignmentGuidesStore();
 
   const [fabricCanvas, setFabricCanvas] = useState<Canvas | null>(null);
@@ -66,6 +60,30 @@ export function EditorPage() {
   const frameMenuRef = useRef<HTMLDivElement>(null);
   const [zoomControls, setZoomControls] = useState<ZoomControls | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [viewportOffset, setViewportOffset] = useState({ x: 0, y: 0 });
+
+  // Use custom hooks for canvas operations
+  const canvasOps = useCanvasOperations(fabricCanvas);
+  const { handleSave } = useCanvasSave(fabricCanvas, projectId, currentSide);
+  const { regenerateFillPattern } = usePatternGeneration(
+    fabricCanvas,
+    currentProject?.width_mm || 0,
+    currentProject?.height_mm || 0,
+    setSelectedObject,
+    setDirty
+  );
+
+  // Use canvas selection hook
+  useCanvasSelection(fabricCanvas, selectedObject, canvasOps.deleteSelected, setDirty);
+
+  // Phase 2 UX hook - integrates undo/redo, context menu, keyboard shortcuts
+  const editorUX = useEditorUX({
+    canvas: fabricCanvas,
+    selectedObject,
+    zoomControls,
+    onDelete: canvasOps?.deleteSelected,
+    // onDuplicate not provided - useEditorUX will use its built-in duplicate handler
+  });
 
   useEffect(() => {
     if (projectId) {
@@ -90,102 +108,8 @@ export function EditorPage() {
     }
   }, [frameMenuOpen]);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const activeElement = document.activeElement as HTMLElement;
-      const isEditingText = activeElement?.tagName === 'INPUT' ||
-                            activeElement?.tagName === 'TEXTAREA' ||
-                            activeElement?.isContentEditable;
-
-      // Don't handle keyboard shortcuts while editing text
-      if (isEditingText) return;
-
-      // Handle delete/backspace
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (fabricCanvas && selectedObject) {
-          e.preventDefault();
-          const active = fabricCanvas.getActiveObjects();
-          if (active.length > 0) {
-            active.forEach((obj) => fabricCanvas.remove(obj));
-            fabricCanvas.discardActiveObject();
-            fabricCanvas.requestRenderAll();
-            setSelectedObject(null);
-          }
-        }
-      }
-
-      // Handle arrow keys for moving objects
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-        if (fabricCanvas && selectedObject) {
-          e.preventDefault();
-
-          // Determine step size: 10px with Shift, 1px otherwise
-          const step = e.shiftKey ? 10 : 1;
-
-          const currentLeft = selectedObject.left || 0;
-          const currentTop = selectedObject.top || 0;
-
-          switch (e.key) {
-            case 'ArrowUp':
-              selectedObject.set('top', currentTop - step);
-              break;
-            case 'ArrowDown':
-              selectedObject.set('top', currentTop + step);
-              break;
-            case 'ArrowLeft':
-              selectedObject.set('left', currentLeft - step);
-              break;
-            case 'ArrowRight':
-              selectedObject.set('left', currentLeft + step);
-              break;
-          }
-
-          selectedObject.setCoords();
-          fabricCanvas.requestRenderAll();
-          setDirty(true);
-        }
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [fabricCanvas, selectedObject, setDirty]);
-
-  const handleSave = async () => {
-    if (!fabricCanvas || !projectId) return;
-    const json = fabricCanvas.toJSON();
-    await saveCanvas(projectId, json as Record<string, unknown>, currentSide);
-  };
-
-  // Auto-save when canvas becomes dirty
-  useEffect(() => {
-    if (!isDirty || !fabricCanvas || !projectId) return;
-
-    // Debounce auto-save by 500ms to avoid excessive saves
-    const timeoutId = setTimeout(async () => {
-      const json = fabricCanvas.toJSON();
-      await saveCanvas(projectId, json as Record<string, unknown>, currentSide);
-    }, 500);
-
-    return () => clearTimeout(timeoutId);
-  }, [isDirty, fabricCanvas, projectId, currentSide, saveCanvas]);
-
   const handleAddText = () => {
-    if (!fabricCanvas) return;
-    const text = new IText('Double-click to edit', {
-      left: fabricCanvas.width! / 2,
-      top: fabricCanvas.height! / 2,
-      originX: 'center',
-      originY: 'center',
-      fontFamily: 'Arial',
-      fontSize: 24,
-      fill: '#000000',
-      editable: true,
-    });
-    fabricCanvas.add(text);
-    fabricCanvas.setActiveObject(text);
-    fabricCanvas.requestRenderAll();
+    canvasOps.addText();
   };
 
   const handleAddImage = async () => {
@@ -223,29 +147,8 @@ export function EditorPage() {
   };
 
   const handleAddImageToCanvas = async (dataUrl: string) => {
-    if (!fabricCanvas) return;
-
     try {
-      const img = await FabricImage.fromURL(dataUrl);
-
-      // Scale to fit canvas if too large
-      const maxDim = Math.max(fabricCanvas.width!, fabricCanvas.height!) * 0.8;
-      if (img.width! > maxDim || img.height! > maxDim) {
-        const scale = maxDim / Math.max(img.width!, img.height!);
-        img.scale(scale);
-      }
-
-      img.set({
-        left: fabricCanvas.width! / 2,
-        top: fabricCanvas.height! / 2,
-        originX: 'center',
-        originY: 'center',
-      });
-
-      fabricCanvas.add(img);
-      fabricCanvas.setActiveObject(img);
-      fabricCanvas.requestRenderAll();
-
+      await canvasOps.addImageToCanvas(dataUrl);
       // Auto-save after adding image to ensure preview shows it
       if (projectId) {
         await handleSave();
@@ -257,30 +160,22 @@ export function EditorPage() {
   };
 
   const handleDeleteSelected = () => {
-    if (!fabricCanvas) return;
-    const active = fabricCanvas.getActiveObjects();
-    if (active.length > 0) {
-      active.forEach((obj) => fabricCanvas.remove(obj));
-      fabricCanvas.discardActiveObject();
-      fabricCanvas.requestRenderAll();
+    const deleted = canvasOps.deleteSelected();
+    if (deleted) {
       setSelectedObject(null);
     }
   };
 
   const handleBringToFront = () => {
-    if (!fabricCanvas || !selectedObject) return;
-    fabricCanvas.bringObjectToFront(selectedObject);
-    fabricCanvas.requestRenderAll();
-    // Trigger a modified event to update the layer panel
-    fabricCanvas.fire('object:modified', { target: selectedObject });
+    if (selectedObject) {
+      canvasOps.bringToFront(selectedObject);
+    }
   };
 
   const handleSendToBack = () => {
-    if (!fabricCanvas || !selectedObject) return;
-    fabricCanvas.sendObjectToBack(selectedObject);
-    fabricCanvas.requestRenderAll();
-    // Trigger a modified event to update the layer panel
-    fabricCanvas.fire('object:modified', { target: selectedObject });
+    if (selectedObject) {
+      canvasOps.sendToBack(selectedObject);
+    }
   };
 
   const handleStartPlot = () => {
@@ -461,66 +356,45 @@ export function EditorPage() {
     }
   };
 
-  // Regenerate fill pattern with updated properties
-  const regenerateFillPattern = (
-    obj: FabricObject,
-    updates: {
-      spacing?: number;
-      strokeColor?: string;
-      strokeWidth?: number;
-    }
-  ) => {
-    if (!fabricCanvas || !currentProject) return;
-
-    const patternType = (obj as any).fillPatternType;
-    const createFn = FILL_PATTERN_CREATORS[patternType];
-    if (!createFn) return;
-
-    // Get existing properties, applying updates
-    const borderMargin = (obj as any).fillPatternBorderMargin || 10;
-    const spacing = updates.spacing ?? (obj as any).fillPatternSpacing ?? 4;
-    const strokeColor = updates.strokeColor ?? (obj as any).fillPatternStroke ?? '#000000';
-    const strokeWidth = updates.strokeWidth ?? (obj as any).fillPatternStrokeWidth ?? 0.5;
-    const rotation = obj.angle || 0;
-
-    // Store position before removing
-    const left = obj.left;
-    const top = obj.top;
-
-    // Create new pattern with updated properties
-    const newPattern = createFn({
-      canvasWidthMm: currentProject.width_mm,
-      canvasHeightMm: currentProject.height_mm,
-      borderMarginMm: borderMargin,
-      spacingMm: spacing,
-      strokeWidth: strokeWidth * 3,
-      stroke: strokeColor,
-      rotation: 0, // We'll set rotation after
-    });
-
-    // Copy metadata to new pattern
-    newPattern.set('fillPatternType', patternType);
-    newPattern.set('fillPatternSpacing', spacing);
-    newPattern.set('fillPatternBorderMargin', borderMargin);
-    newPattern.set('fillPatternStroke', strokeColor);
-    newPattern.set('fillPatternStrokeWidth', strokeWidth);
-    newPattern.set('angle', rotation);
-    newPattern.set('left', left);
-    newPattern.set('top', top);
-
-    // Remove old pattern and add new one
-    fabricCanvas.remove(obj);
-    fabricCanvas.add(newPattern);
-    fabricCanvas.setActiveObject(newPattern);
-    setSelectedObject(newPattern);
-    fabricCanvas.requestRenderAll();
-    setDirty(true);
-  };
-
   if (projectLoading || !currentProject) {
     return (
-      <div className="page">
-        <p>Loading project...</p>
+      <div className="editor-layout">
+        {/* Toolbar skeleton */}
+        <div className="editor-toolbar">
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ width: '100px', height: '36px', backgroundColor: 'var(--color-border)', borderRadius: 'var(--radius)' }} />
+            <div style={{ width: '100px', height: '36px', backgroundColor: 'var(--color-border)', borderRadius: 'var(--radius)' }} />
+          </div>
+        </div>
+
+        {/* Left sidebar skeleton */}
+        <div className="editor-sidebar-left">
+          <h3 style={{ marginBottom: 16, fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+            <Layers size={16} style={{ marginRight: 8, display: 'inline' }} />
+            Layers
+          </h3>
+          <LayerPanelSkeleton />
+        </div>
+
+        {/* Canvas skeleton */}
+        <div className="editor-canvas-container">
+          <CanvasSkeleton />
+        </div>
+
+        {/* Right sidebar skeleton */}
+        <div className="editor-sidebar-right">
+          <h3 style={{ marginBottom: 16, fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Properties</h3>
+          <PropertiesPanelSkeleton />
+        </div>
+
+        {/* Footer */}
+        <div className="editor-footer">
+          <div>
+            <span style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
+              Loading project...
+            </span>
+          </div>
+        </div>
       </div>
     );
   }
@@ -550,6 +424,26 @@ export function EditorPage() {
                 </button>
               ))}
           </div>
+
+          <div style={{ width: 1, height: 24, background: 'var(--color-border)', margin: '0 8px' }} />
+
+          {/* Undo/Redo buttons */}
+          <button
+            className="btn btn-secondary btn-icon"
+            onClick={editorUX.handleUndo}
+            disabled={!editorUX.canUndo}
+            title={`Undo (${navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl'}+Z)`}
+          >
+            <Undo2 size={18} />
+          </button>
+          <button
+            className="btn btn-secondary btn-icon"
+            onClick={editorUX.handleRedo}
+            disabled={!editorUX.canRedo}
+            title={`Redo (${navigator.platform.includes('Mac') ? 'Cmd' : 'Ctrl'}+Shift+Z)`}
+          >
+            <Redo2 size={18} />
+          </button>
 
           <div style={{ width: 1, height: 24, background: 'var(--color-border)', margin: '0 8px' }} />
 
@@ -622,6 +516,16 @@ export function EditorPage() {
           >
             <Trash2 size={18} />
           </button>
+
+          <div style={{ width: 1, height: 24, background: 'var(--color-border)', margin: '0 8px' }} />
+
+          {/* Alignment Toolbar */}
+          <AlignmentToolbar
+            canvas={fabricCanvas}
+            selectedObject={selectedObject}
+            canvasWidth={currentProject?.width_mm || 0}
+            canvasHeight={currentProject?.height_mm || 0}
+          />
         </div>
 
         <div className="flex items-center gap-2">
@@ -638,41 +542,144 @@ export function EditorPage() {
 
       {/* Left sidebar - Layers */}
       <div className="editor-sidebar-left">
-        <h3 style={{ marginBottom: 16, fontSize: '0.875rem', fontWeight: 600 }}>
+        <h3 style={{ marginBottom: 16, fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
           <Layers size={16} style={{ marginRight: 8, display: 'inline' }} />
           Layers
         </h3>
-        <LayerPanel
-          canvas={fabricCanvas}
-          selectedObject={selectedObject}
-          onSelect={(obj) => {
-            if (fabricCanvas && obj) {
-              fabricCanvas.setActiveObject(obj);
-              fabricCanvas.requestRenderAll();
-              setSelectedObject(obj);
-            } else {
-              fabricCanvas?.discardActiveObject();
-              fabricCanvas?.requestRenderAll();
-              setSelectedObject(null);
-            }
-          }}
-          onBringToFront={handleBringToFront}
-          onSendToBack={handleSendToBack}
-        />
+        <InlineErrorBoundary
+          fallback={(_error, reset) => (
+            <div style={{
+              padding: '16px',
+              backgroundColor: 'var(--color-bg)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius)',
+              textAlign: 'center'
+            }}>
+              <AlertTriangle size={20} color="var(--color-error)" style={{ marginBottom: 8 }} />
+              <p style={{ fontSize: '0.875rem', marginBottom: 8, color: 'var(--color-text-secondary)' }}>
+                Failed to load layers
+              </p>
+              <button className="btn btn-secondary btn-sm" onClick={reset}>
+                <RefreshCw size={14} />
+                Retry
+              </button>
+            </div>
+          )}
+        >
+          <LayerPanel
+            canvas={fabricCanvas}
+            selectedObject={selectedObject}
+            onSelect={(obj) => {
+              if (fabricCanvas && obj) {
+                fabricCanvas.setActiveObject(obj);
+                fabricCanvas.requestRenderAll();
+                setSelectedObject(obj);
+              } else {
+                fabricCanvas?.discardActiveObject();
+                fabricCanvas?.requestRenderAll();
+                setSelectedObject(null);
+              }
+            }}
+            onBringToFront={handleBringToFront}
+            onSendToBack={handleSendToBack}
+          />
+        </InlineErrorBoundary>
       </div>
 
       {/* Canvas */}
       <div className="editor-canvas-container">
-        <FabricCanvas
-          width={currentProject.width_mm}
-          height={currentProject.height_mm}
-          projectId={currentProject.id}
-          side={currentSide}
-          onCanvasReady={setFabricCanvas}
-          onSelectionChange={setSelectedObject}
-          onZoomControlsReady={setZoomControls}
-          onZoomChange={setZoomLevel}
-        />
+        <ErrorBoundary
+          fallback={
+            <div style={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'var(--color-bg)'
+            }}>
+              <div className="card" style={{ maxWidth: '400px', textAlign: 'center' }}>
+                <AlertTriangle size={48} color="var(--color-error)" style={{ marginBottom: 16 }} />
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: 8, color: 'var(--color-text-primary)' }}>
+                  Canvas Error
+                </h3>
+                <p style={{ color: 'var(--color-text-secondary)', marginBottom: 16 }}>
+                  Failed to load the canvas. Please try refreshing the page.
+                </p>
+                <button className="btn btn-primary" onClick={() => window.location.reload()}>
+                  <RefreshCw size={16} />
+                  Reload Page
+                </button>
+              </div>
+            </div>
+          }
+        >
+          {/* Ruler - Horizontal */}
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 30,
+            right: 0,
+            height: 30,
+            zIndex: 10
+          }}>
+            <Ruler
+              orientation="horizontal"
+              canvasWidthMm={currentProject.width_mm}
+              canvasHeightMm={currentProject.height_mm}
+              zoom={zoomLevel}
+              offset={viewportOffset}
+              pixelsPerMm={3}
+            />
+          </div>
+
+          {/* Ruler - Vertical */}
+          <div style={{
+            position: 'absolute',
+            top: 30,
+            left: 0,
+            bottom: 0,
+            width: 30,
+            zIndex: 10
+          }}>
+            <Ruler
+              orientation="vertical"
+              canvasWidthMm={currentProject.width_mm}
+              canvasHeightMm={currentProject.height_mm}
+              zoom={zoomLevel}
+              offset={viewportOffset}
+              pixelsPerMm={3}
+            />
+          </div>
+
+          {/* Canvas with Grid Overlay */}
+          <div style={{ position: 'absolute', top: 30, left: 30, right: 0, bottom: 0 }}>
+            <FabricCanvas
+              width={currentProject.width_mm}
+              height={currentProject.height_mm}
+              projectId={currentProject.id}
+              side={currentSide}
+              onCanvasReady={setFabricCanvas}
+              onSelectionChange={setSelectedObject}
+              onZoomControlsReady={setZoomControls}
+              onZoomChange={setZoomLevel}
+              onViewportChange={setViewportOffset}
+            />
+
+            {/* Grid Overlay */}
+            {fabricCanvas && (
+              <GridOverlay
+                canvas={fabricCanvas}
+                config={gridConfig}
+                canvasWidthMm={currentProject.width_mm}
+                canvasHeightMm={currentProject.height_mm}
+                pixelsPerMm={3}
+                zoom={zoomLevel}
+              />
+            )}
+          </div>
+
+        </ErrorBoundary>
 
         {/* Zoom controls */}
         <div className="zoom-controls">
@@ -723,14 +730,43 @@ export function EditorPage() {
 
       {/* Right sidebar - Properties */}
       <div className="editor-sidebar-right">
-        <h3 style={{ marginBottom: 16, fontSize: '0.875rem', fontWeight: 600 }}>Properties</h3>
+        <h3 style={{ marginBottom: 16, fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Properties</h3>
 
-        {/* Alignment Guides Settings */}
-        <div style={{ marginBottom: 20, padding: 12, background: 'var(--color-bg)', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
-          <h4 style={{ marginBottom: 12, fontSize: '0.8rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Grid3x3 size={14} />
-            Alignment Guides
-          </h4>
+        <InlineErrorBoundary
+          fallback={(_error, reset) => (
+            <div style={{
+              padding: '16px',
+              backgroundColor: 'var(--color-bg)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius)',
+              textAlign: 'center',
+              marginBottom: 16
+            }}>
+              <AlertTriangle size={20} color="var(--color-error)" style={{ marginBottom: 8 }} />
+              <p style={{ fontSize: '0.875rem', marginBottom: 8, color: 'var(--color-text-secondary)' }}>
+                Failed to load properties
+              </p>
+              <button className="btn btn-secondary btn-sm" onClick={reset}>
+                <RefreshCw size={14} />
+                Retry
+              </button>
+            </div>
+          )}
+        >
+          {/* Grid Controls */}
+          <div style={{ marginBottom: 20 }}>
+            <GridControls
+              config={gridConfig}
+              onChange={setGridConfig}
+            />
+          </div>
+
+          {/* Alignment Guides Settings */}
+          <div style={{ marginBottom: 20, padding: 12, background: 'var(--color-bg)', borderRadius: '8px', border: '1px solid var(--color-border)' }}>
+            <h4 style={{ marginBottom: 12, fontSize: '0.8rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-text-primary)' }}>
+              <Grid3x3 size={14} />
+              Alignment Guides
+            </h4>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.8rem' }}>
@@ -801,7 +837,7 @@ export function EditorPage() {
           <div>
             <div className="form-group">
               <label className="form-label">Type</label>
-              <p style={{ fontSize: '0.875rem' }}>{selectedObject.type}</p>
+              <p style={{ fontSize: '0.875rem', color: 'var(--color-text-primary)' }}>{selectedObject.type}</p>
             </div>
 
             {/* Text-specific properties */}
@@ -1081,7 +1117,7 @@ export function EditorPage() {
               <>
                 <div className="form-group">
                   <label className="form-label">Pattern Type</label>
-                  <p style={{ fontSize: '0.875rem', textTransform: 'capitalize' }}>
+                  <p style={{ fontSize: '0.875rem', textTransform: 'capitalize', color: 'var(--color-text-primary)' }}>
                     {(selectedObject as any).fillPatternType?.replace('-', ' ') || 'Fill Pattern'}
                   </p>
                 </div>
@@ -1197,13 +1233,13 @@ export function EditorPage() {
 
             <div className="form-group">
               <label className="form-label">Position</label>
-              <p style={{ fontSize: '0.875rem' }}>
+              <p style={{ fontSize: '0.875rem', color: 'var(--color-text-primary)' }}>
                 X: {Math.round(selectedObject.left || 0)}, Y: {Math.round(selectedObject.top || 0)}
               </p>
             </div>
             <div className="form-group">
               <label className="form-label">Size</label>
-              <p style={{ fontSize: '0.875rem' }}>
+              <p style={{ fontSize: '0.875rem', color: 'var(--color-text-primary)' }}>
                 {Math.round((selectedObject.width || 0) * (selectedObject.scaleX || 1))} x{' '}
                 {Math.round((selectedObject.height || 0) * (selectedObject.scaleY || 1))}
               </p>
@@ -1243,6 +1279,7 @@ export function EditorPage() {
             Select an object to see its properties
           </p>
         )}
+        </InlineErrorBoundary>
       </div>
 
       {/* Footer */}
@@ -1296,6 +1333,31 @@ export function EditorPage() {
           }}
           imageDataUrl={pendingImageDataUrl}
           onAddToCanvas={handleAddImageToCanvas}
+        />
+      )}
+
+      {/* Save Indicator */}
+      <SaveIndicator />
+
+      {/* Context Menu */}
+      {editorUX.contextMenu.visible && (
+        <ContextMenu
+          x={editorUX.contextMenu.x}
+          y={editorUX.contextMenu.y}
+          selectedObject={selectedObject}
+          hasClipboard={editorUX.hasClipboard}
+          onCopy={editorUX.handleCopy}
+          onCut={editorUX.handleCut}
+          onPaste={editorUX.handlePaste}
+          onDuplicate={editorUX.handleDuplicate}
+          onDelete={editorUX.handleDelete}
+          onBringToFront={editorUX.handleBringToFront}
+          onSendToBack={editorUX.handleSendToBack}
+          onLock={editorUX.handleLock}
+          onUnlock={editorUX.handleUnlock}
+          onGroup={editorUX.handleGroup}
+          onUngroup={editorUX.handleUngroup}
+          onClose={editorUX.closeContextMenu}
         />
       )}
     </div>

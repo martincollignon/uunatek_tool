@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { GridConfig } from '../components/canvas/GridOverlay';
 
 interface AlignmentGuidesState {
   // Visibility settings
@@ -12,6 +13,15 @@ interface AlignmentGuidesState {
   snapToGuides: boolean;
   snapThreshold: number;
 
+  // Snap state (moved from global variables in alignmentGuides.ts)
+  isSnappedHorizontal: boolean;
+  isSnappedVertical: boolean;
+  currentVerticalSnapPos: number | undefined;
+  currentHorizontalSnapPos: number | undefined;
+
+  // Grid settings
+  gridConfig: GridConfig;
+
   // Actions
   toggleStaticGuides: () => void;
   toggleSmartGuides: () => void;
@@ -20,6 +30,14 @@ interface AlignmentGuidesState {
   toggleHalves: () => void;
   toggleSnapToGuides: () => void;
   setSnapThreshold: (threshold: number) => void;
+  setGridConfig: (config: GridConfig) => void;
+  setSnapState: (state: {
+    isSnappedHorizontal: boolean;
+    isSnappedVertical: boolean;
+    currentVerticalSnapPos: number | undefined;
+    currentHorizontalSnapPos: number | undefined;
+  }) => void;
+  resetSnapState: () => void;
 }
 
 export const useAlignmentGuidesStore = create<AlignmentGuidesState>((set) => ({
@@ -32,6 +50,21 @@ export const useAlignmentGuidesStore = create<AlignmentGuidesState>((set) => ({
   snapToGuides: true,
   snapThreshold: 5,
 
+  // Default snap state
+  isSnappedHorizontal: false,
+  isSnappedVertical: false,
+  currentVerticalSnapPos: undefined,
+  currentHorizontalSnapPos: undefined,
+
+  // Default grid settings
+  gridConfig: {
+    enabled: false,
+    spacing: 5,
+    snapEnabled: false,
+    color: '#e0e0e0',
+    opacity: 0.5,
+  },
+
   toggleStaticGuides: () => set((state) => ({ showStaticGuides: !state.showStaticGuides })),
   toggleSmartGuides: () => set((state) => ({ showSmartGuides: !state.showSmartGuides })),
   toggleCenter: () => set((state) => ({ showCenter: !state.showCenter })),
@@ -39,4 +72,12 @@ export const useAlignmentGuidesStore = create<AlignmentGuidesState>((set) => ({
   toggleHalves: () => set((state) => ({ showHalves: !state.showHalves })),
   toggleSnapToGuides: () => set((state) => ({ snapToGuides: !state.snapToGuides })),
   setSnapThreshold: (threshold: number) => set({ snapThreshold: threshold }),
+  setGridConfig: (config: GridConfig) => set({ gridConfig: config }),
+  setSnapState: (state) => set(state),
+  resetSnapState: () => set({
+    isSnappedHorizontal: false,
+    isSnappedVertical: false,
+    currentVerticalSnapPos: undefined,
+    currentHorizontalSnapPos: undefined,
+  }),
 }));

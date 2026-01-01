@@ -98,11 +98,11 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='plotter-backend',
-    debug=False,
+    debug=True,  # Enable debug for troubleshooting
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,  # No console window on macOS
+    console=True,  # Enable console to see errors
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

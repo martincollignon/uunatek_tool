@@ -172,7 +172,7 @@ export function CalibrationWizard({ onClose }: Props) {
   const renderStep1 = () => (
     <>
       <div className="dialog-content">
-        <h3 style={{ marginBottom: 12, fontSize: '1rem', fontWeight: 600 }}>
+        <h3 style={{ marginBottom: 12, fontSize: '1rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
           Pen Height Calibration
         </h3>
         <p style={{ color: 'var(--color-text-secondary)', marginBottom: 16, fontSize: '0.875rem' }}>
@@ -188,7 +188,7 @@ export function CalibrationWizard({ onClose }: Props) {
             marginBottom: 16,
           }}
         >
-          <div style={{ fontWeight: 500, marginBottom: 8, fontSize: '0.875rem' }}>
+          <div style={{ fontWeight: 500, marginBottom: 8, fontSize: '0.875rem', color: 'var(--color-text-primary)' }}>
             Before starting, make sure:
           </div>
           <ul style={{ paddingLeft: 20, color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
@@ -215,7 +215,7 @@ export function CalibrationWizard({ onClose }: Props) {
     <>
       <div className="dialog-content">
         {renderError()}
-        <h3 style={{ marginBottom: 12, fontSize: '1rem', fontWeight: 600 }}>
+        <h3 style={{ marginBottom: 12, fontSize: '1rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
           Moving to Test Position
         </h3>
         <p style={{ color: 'var(--color-text-secondary)', marginBottom: 16, fontSize: '0.875rem' }}>
@@ -234,7 +234,7 @@ export function CalibrationWizard({ onClose }: Props) {
             }}
           >
             <Loader2 size={24} className="animate-spin" style={{ color: 'var(--color-primary)' }} />
-            <span>Moving pen to test position...</span>
+            <span style={{ color: 'var(--color-text-primary)' }}>Moving pen to test position...</span>
           </div>
         )}
       </div>
@@ -255,7 +255,7 @@ export function CalibrationWizard({ onClose }: Props) {
     <>
       <div className="dialog-content">
         {renderError()}
-        <h3 style={{ marginBottom: 12, fontSize: '1rem', fontWeight: 600 }}>Adjust Pen Height</h3>
+        <h3 style={{ marginBottom: 12, fontSize: '1rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Adjust Pen Height</h3>
 
         <div
           style={{
@@ -269,7 +269,7 @@ export function CalibrationWizard({ onClose }: Props) {
             justifyContent: 'space-between',
           }}
         >
-          <span style={{ fontWeight: 500, fontSize: '0.875rem' }}>
+          <span style={{ fontWeight: 500, fontSize: '0.875rem', color: 'var(--color-text-primary)' }}>
             Pen is {penIsDown ? 'DOWN' : 'UP'}
           </span>
           {penIsDown ? (
@@ -293,7 +293,7 @@ export function CalibrationWizard({ onClose }: Props) {
               marginBottom: 16,
             }}
           >
-            <div style={{ fontWeight: 500, marginBottom: 12, fontSize: '0.875rem' }}>
+            <div style={{ fontWeight: 500, marginBottom: 12, fontSize: '0.875rem', color: 'var(--color-text-primary)' }}>
               While the pen is down:
             </div>
             <ol
@@ -349,7 +349,7 @@ export function CalibrationWizard({ onClose }: Props) {
     <>
       <div className="dialog-content">
         {renderError()}
-        <h3 style={{ marginBottom: 12, fontSize: '1rem', fontWeight: 600 }}>Draw Test Mark</h3>
+        <h3 style={{ marginBottom: 12, fontSize: '1rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Draw Test Mark</h3>
         <p style={{ color: 'var(--color-text-secondary)', marginBottom: 16, fontSize: '0.875rem' }}>
           A small test pattern (10mm square with X) will be drawn to verify the pen makes proper
           contact with the paper.
@@ -392,7 +392,7 @@ export function CalibrationWizard({ onClose }: Props) {
             }}
           >
             <Loader2 size={24} className="animate-spin" style={{ color: 'var(--color-primary)' }} />
-            <span>Drawing test pattern...</span>
+            <span style={{ color: 'var(--color-text-primary)' }}>Drawing test pattern...</span>
           </div>
         )}
 
@@ -454,7 +454,7 @@ export function CalibrationWizard({ onClose }: Props) {
         >
           <Check size={32} style={{ color: 'var(--color-success)' }} />
         </div>
-        <h3 style={{ marginBottom: 12, fontSize: '1.125rem', fontWeight: 600 }}>
+        <h3 style={{ marginBottom: 12, fontSize: '1.125rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
           Calibration Complete!
         </h3>
         <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>

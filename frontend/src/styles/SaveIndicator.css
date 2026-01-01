@@ -1,0 +1,99 @@
+/* Save Indicator Styles */
+
+.save-indicator {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  animation: slideIn 0.3s ease-out;
+  transition: opacity 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.save-indicator-text {
+  white-space: nowrap;
+}
+
+.save-indicator-dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 8px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.save-indicator-dismiss:hover {
+  opacity: 1;
+}
+
+/* Saving state */
+.save-indicator-saving {
+  background-color: #3b82f6;
+  color: white;
+}
+
+/* Saved state */
+.save-indicator-saved {
+  background-color: #10b981;
+  color: white;
+}
+
+/* Error state */
+.save-indicator-error {
+  background-color: #ef4444;
+  color: white;
+}
+
+/* Spinner animation */
+.save-indicator-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .save-indicator {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* Mobile adjustments */
+@media (max-width: 768px) {
+  .save-indicator {
+    bottom: 16px;
+    right: 16px;
+    font-size: 0.8125rem;
+    padding: 8px 12px;
+  }
+}

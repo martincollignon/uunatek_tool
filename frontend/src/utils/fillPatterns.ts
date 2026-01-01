@@ -315,6 +315,7 @@ export function createDiagonalStripeFill(options: FillPatternOptions): Group {
     originY: 'center',
     angle: rotation,
     selectable: true,
+    excludeFromExport: false,  // Ensure group is included in toJSON() serialization
   });
 
   group.setCoords();
@@ -412,6 +413,7 @@ export function createChevronFill(options: FillPatternOptions): Group {
     originY: 'center',
     angle: rotation,
     selectable: true,
+    excludeFromExport: false,  // Ensure group is included in toJSON() serialization
   });
 
   group.setCoords();
@@ -544,6 +546,7 @@ export function createGraphGridFill(options: FillPatternOptions): Group {
     originY: 'center',
     angle: rotation,
     selectable: true,
+    excludeFromExport: false,  // Ensure group is included in toJSON() serialization
   });
 
   group.setCoords();
@@ -616,6 +619,7 @@ export function createPlusGridFill(options: FillPatternOptions): Group {
     originY: 'center',
     angle: rotation,
     selectable: true,
+    excludeFromExport: false,  // Ensure group is included in toJSON() serialization
   });
 
   group.setCoords();
@@ -684,6 +688,7 @@ export function createSquiggleFill(options: FillPatternOptions): Group {
     originY: 'center',
     angle: rotation,
     selectable: true,
+    excludeFromExport: false,  // Ensure group is included in toJSON() serialization
   });
 
   group.setCoords();

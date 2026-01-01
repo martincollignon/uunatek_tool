@@ -17,6 +17,7 @@ export function PlotPage() {
   const { currentStep, setStep, resetWorkflow, loadWorkflow, saveWorkflow } = useWorkflowStore();
 
   const [svgPreview, setSvgPreview] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [isLoadingSvg, setIsLoadingSvg] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -72,10 +73,12 @@ export function PlotPage() {
     setIsLoadingSvg(true);
     try {
       const side = getCurrentSide();
-      const svg = await canvasApi.exportSvg(projectId, side);
-      setSvgPreview(svg);
+      const response = await canvasApi.exportSvg(projectId, side);
+      setSvgPreview(response.svg);
+      setWarnings(response.warnings);
     } catch (err) {
       console.error('Failed to load SVG preview:', err);
+      setWarnings([]);
     } finally {
       setIsLoadingSvg(false);
     }
@@ -195,7 +198,7 @@ export function PlotPage() {
           <button className="btn btn-secondary btn-icon" onClick={handleBackToEditor}>
             <ArrowLeft size={18} />
           </button>
-          <h1 style={{ fontSize: '1.25rem', fontWeight: 600 }}>{currentProject.name}</h1>
+          <h1 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{currentProject.name}</h1>
         </div>
         <div className="flex items-center gap-4">
           <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem' }}>
@@ -235,7 +238,7 @@ export function PlotPage() {
         <div className="plot-main">
           {/* Preview area */}
           <div className="preview-container">
-            <h3 style={{ marginBottom: 16, fontSize: '0.875rem', fontWeight: 600 }}>
+            <h3 style={{ marginBottom: 16, fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
               {isPreview && 'Preview'}
               {isPlotting && 'Plotting'}
               {isConfirm && 'Complete'}
@@ -244,24 +247,67 @@ export function PlotPage() {
             </h3>
 
             {(isPreview || isPlotting || isConfirm) && (
-              <div className="svg-preview">
-                {isLoadingSvg ? (
-                  <p>Loading preview...</p>
-                ) : svgPreview ? (
+              <>
+                {warnings.length > 0 && (
                   <div
-                    dangerouslySetInnerHTML={{ __html: svgPreview }}
                     style={{
-                      maxWidth: '100%',
-                      maxHeight: 400,
-                      background: 'white',
+                      background: 'rgba(245, 158, 11, 0.1)',
+                      border: '1px solid rgba(245, 158, 11, 0.3)',
                       borderRadius: 'var(--radius)',
-                      padding: 16,
+                      padding: '12px 16px',
+                      marginBottom: 16,
                     }}
-                  />
-                ) : (
-                  <p style={{ color: 'var(--color-text-secondary)' }}>No content to preview</p>
+                  >
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                      <svg
+                        width="20"
+                        height="20"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="rgb(245, 158, 11)"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        style={{ flexShrink: 0, marginTop: 2 }}
+                      >
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                        <line x1="12" y1="9" x2="12" y2="13" />
+                        <line x1="12" y1="17" x2="12.01" y2="17" />
+                      </svg>
+                      <div style={{ flex: 1 }}>
+                        <h4 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 4, color: 'var(--color-warning)' }}>
+                          Plottability Warnings
+                        </h4>
+                        <ul style={{ fontSize: '0.875rem', margin: 0, paddingLeft: 20, color: 'var(--color-warning)' }}>
+                          {warnings.map((warning, index) => (
+                            <li key={index} style={{ marginBottom: 4 }}>
+                              {warning}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
                 )}
-              </div>
+                <div className="svg-preview">
+                  {isLoadingSvg ? (
+                    <p>Loading preview...</p>
+                  ) : svgPreview ? (
+                    <div
+                      dangerouslySetInnerHTML={{ __html: svgPreview }}
+                      style={{
+                        maxWidth: '100%',
+                        maxHeight: 400,
+                        background: 'white',
+                        borderRadius: 'var(--radius)',
+                        padding: 16,
+                      }}
+                    />
+                  ) : (
+                    <p style={{ color: 'var(--color-text-secondary)' }}>No content to preview</p>
+                  )}
+                </div>
+              </>
             )}
 
             {isPaperAction && (

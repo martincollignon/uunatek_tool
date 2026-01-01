@@ -1,4 +1,8 @@
-"""Plotter control API routes."""
+"""Plotter control API routes for iDraw 2.0 with DrawCore (GRBL) firmware.
+
+This module provides REST API endpoints for controlling the iDraw 2.0 pen plotter.
+The plotter uses GRBL-based DrawCore firmware which accepts G-code commands.
+"""
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -7,7 +11,7 @@ from typing import Optional, List
 import asyncio
 
 from core.plotter.connection import PlotterConnection
-from core.plotter.commands import EBBCommands
+from core.plotter.grbl_commands import GRBLCommands
 from core.plotter.executor import PlotExecutor
 from core.plotter.errors import (
     PlotterError,
@@ -20,12 +24,13 @@ from core.svg.parser import SVGParser
 from core.svg.generator import SVGGenerator
 from models.plotter import PlotterStatus, PlotProgress, PlotState, PenState
 from api.routes.projects import get_project_by_id
+from config import get_settings
 
 router = APIRouter(prefix="/api/plotter", tags=["plotter"])
 
 # Global plotter instances
 _connection: Optional[PlotterConnection] = None
-_commands: Optional[EBBCommands] = None
+_commands: Optional[GRBLCommands] = None
 _executor: Optional[PlotExecutor] = None
 _current_progress: PlotProgress = PlotProgress()
 
@@ -58,11 +63,11 @@ def _get_connection() -> PlotterConnection:
     return _connection
 
 
-def _get_commands() -> EBBCommands:
-    """Get or create commands instance."""
+def _get_commands() -> GRBLCommands:
+    """Get or create GRBL commands instance."""
     global _commands, _connection
     if _commands is None:
-        _commands = EBBCommands(_get_connection())
+        _commands = GRBLCommands(_get_connection())
     return _commands
 
 
@@ -139,7 +144,10 @@ async def connect(port: Optional[str] = None):
         await conn.connect(port)
         cmd = _get_commands()
 
-        # Initialize plotter
+        # Initialize GRBL mode (G21 mm units, G90 absolute positioning)
+        await cmd.initialize()
+
+        # Enable motors and raise pen
         await cmd.enable_motors()
         await cmd.pen_up()
 
@@ -259,7 +267,53 @@ async def disable_motors():
 
 @router.post("/plot/start")
 async def start_plot(request: PlotRequest):
-    """Start plotting a project."""
+    """
+    Start plotting a project.
+
+    COMPLETE PIPELINE FLOW:
+    ========================
+    1. Canvas State (Fabric.js JSON):
+       - Retrieved from project database
+       - Contains all canvas objects with pixel coordinates (3 pixels/mm)
+       - Includes canvas-boundary object (for visual reference only)
+
+    2. SVG Generation (SVGGenerator):
+       - Converts Fabric.js JSON → SVG document
+       - Parameters:
+         * vectorize_images=True: Converts raster images to plottable vector paths
+         * include_boundary=False: Excludes canvas-boundary from output (visual guide only)
+       - Applies coordinate conversion: pixels → millimeters
+       - Handles transforms (position, rotation, scale)
+       - Output: SVG string with all plottable elements
+
+    3. SVG Parsing (SVGParser):
+       - Parses SVG elements (path, line, rect, circle, etc.)
+       - Converts to PlotCommand objects: move, line, pen_up, pen_down
+       - Coordinates are in millimeters
+       - Output: List of PlotCommand objects
+
+    4. Plot Execution (PlotExecutor):
+       - Converts PlotCommands → EBB hardware commands
+       - Handles motion planning and speed control
+       - Sends serial commands to plotter hardware
+       - Provides progress updates via WebSocket
+       - Output: Physical drawing on paper
+
+    BOUNDARY HANDLING:
+    ==================
+    - Canvas boundary is a visual guide showing printable area in the UI
+    - MUST NOT be plotted (wastes time, ink, and may damage plotter)
+    - Handled by include_boundary parameter:
+      * Preview export (canvas.py): include_boundary=True (shows boundary)
+      * Plot generation (plotter.py): include_boundary=False (excludes boundary)
+
+    IMAGE HANDLING:
+    ===============
+    - Raster images cannot be plotted directly
+    - vectorize_images=True automatically converts images to vector paths
+    - Uses ImageVectorizer with Potrace algorithm
+    - Fallback: If vectorization fails, excludes image from plot
+    """
     global _executor, _current_progress
 
     if not _connection or not _connection.is_connected:
@@ -282,8 +336,18 @@ async def start_plot(request: PlotRequest):
     if not canvas_json:
         raise HTTPException(status_code=400, detail=f"No canvas data for {request.side}")
 
-    # Generate SVG from canvas with automatic image vectorization
-    generator = SVGGenerator(project.width_mm, project.height_mm, vectorize_images=True)
+    # Generate SVG from canvas for plotting:
+    # - vectorize_images=True: Convert raster images to vector paths
+    # - include_boundary=False: Exclude canvas boundary (visual guide only, should not be plotted)
+    # - safety_margin_mm: Clip content to stay within safe area (prevents pen catching paper edge)
+    settings = get_settings()
+    generator = SVGGenerator(
+        project.width_mm,
+        project.height_mm,
+        vectorize_images=True,
+        include_boundary=False,
+        safety_margin_mm=settings.safety_margin_mm
+    )
     svg_content = generator.generate(canvas_json)
 
     # Parse SVG to plot commands
@@ -300,9 +364,13 @@ async def start_plot(request: PlotRequest):
             )
         raise HTTPException(status_code=400, detail="No plottable content found. Please add shapes, text, or paths to the canvas.")
 
-    # Create executor
+    # Create executor with canvas dimensions for coordinate transformation
     cmd = _get_commands()
-    _executor = PlotExecutor(cmd)
+    _executor = PlotExecutor(
+        cmd,
+        canvas_width_mm=project.width_mm,
+        canvas_height_mm=project.height_mm
+    )
 
     # Progress callback
     async def update_progress(progress: PlotProgress):

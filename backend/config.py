@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     # API Settings
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    # CORS origins - dynamic localhost ports handled by DynamicCORSMiddleware in main.py
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
     # Gemini API
@@ -26,6 +27,9 @@ class Settings(BaseSettings):
     # Speed Settings (mm/min)
     pen_down_speed: int = 2000
     pen_up_speed: int = 8000
+
+    # Safety Margin (mm) - prevents plotting within this distance from paper edge
+    safety_margin_mm: float = 3.0
 
     class Config:
         env_file = ".env"

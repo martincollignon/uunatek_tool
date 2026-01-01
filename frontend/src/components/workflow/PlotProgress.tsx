@@ -35,7 +35,7 @@ export function PlotProgress({ progress, error, onRecoveryAction, onReportProble
       <div className="progress-header">
         <div className="flex items-center gap-2">
           {progress.status === 'plotting' && <Loader2 size={16} className="animate-spin" />}
-          {progress.status === 'paused' && <AlertTriangle size={16} style={{ color: '#eab308' }} />}
+          {progress.status === 'paused' && <AlertTriangle size={16} style={{ color: 'var(--color-warning)' }} />}
           <span style={{ fontWeight: 500, textTransform: 'capitalize' }}>{progress.status}</span>
         </div>
         <span style={{ fontWeight: 600 }}>{percentage}%</span>
@@ -52,7 +52,7 @@ export function PlotProgress({ progress, error, onRecoveryAction, onReportProble
                 : progress.status === 'error'
                   ? 'var(--color-error)'
                   : progress.status === 'paused'
-                    ? '#eab308'
+                    ? 'var(--color-warning)'
                     : 'var(--color-primary)',
           }}
         />
