@@ -8,6 +8,14 @@ export interface AlignmentGuide {
   dash?: number[];
 }
 
+export type HorizontalAnchor = 'left' | 'center' | 'right';
+export type VerticalAnchor = 'top' | 'center' | 'bottom';
+
+export interface AnchorMode {
+  horizontal: HorizontalAnchor;
+  vertical: VerticalAnchor;
+}
+
 export interface SnapState {
   isSnappedHorizontal: boolean;
   isSnappedVertical: boolean;
@@ -24,7 +32,76 @@ export interface SnapResult {
 
 const SNAP_THRESHOLD = 8; // pixels - increased for smoother snapping
 const SNAP_RELEASE_THRESHOLD = 12; // pixels - hysteresis to prevent rapid toggling
-const CENTER_SNAP_WEIGHT = 0.8; // Prioritize center snaps over edge snaps (lower = stronger)
+
+/**
+ * Get the position of a specific horizontal anchor point on an object
+ */
+function getHorizontalAnchorPosition(
+  objectBounds: { left: number; width: number },
+  anchor: HorizontalAnchor
+): number {
+  switch (anchor) {
+    case 'left':
+      return objectBounds.left;
+    case 'center':
+      return objectBounds.left + objectBounds.width / 2;
+    case 'right':
+      return objectBounds.left + objectBounds.width;
+  }
+}
+
+/**
+ * Get the position of a specific vertical anchor point on an object
+ */
+function getVerticalAnchorPosition(
+  objectBounds: { top: number; height: number },
+  anchor: VerticalAnchor
+): number {
+  switch (anchor) {
+    case 'top':
+      return objectBounds.top;
+    case 'center':
+      return objectBounds.top + objectBounds.height / 2;
+    case 'bottom':
+      return objectBounds.top + objectBounds.height;
+  }
+}
+
+/**
+ * Calculate the left position to snap object to a guide using specific anchor
+ */
+function calculateSnapLeft(
+  guidePos: number,
+  objectBounds: { width: number },
+  anchor: HorizontalAnchor
+): number {
+  switch (anchor) {
+    case 'left':
+      return guidePos;
+    case 'center':
+      return guidePos - objectBounds.width / 2;
+    case 'right':
+      return guidePos - objectBounds.width;
+  }
+}
+
+/**
+ * Calculate the top position to snap object to a guide using specific anchor
+ */
+function calculateSnapTop(
+  guidePos: number,
+  objectBounds: { height: number },
+  anchor: VerticalAnchor
+): number {
+  switch (anchor) {
+    case 'top':
+      return guidePos;
+    case 'center':
+      return guidePos - objectBounds.height / 2;
+    case 'bottom':
+      return guidePos - objectBounds.height;
+  }
+}
 
 /**
  * Calculate alignment guides for an object being moved on the canvas
@@ -34,7 +111,8 @@ export function calculateAlignmentGuides(
   activeObject: FabricObject,
   canvasWidth: number,
   canvasHeight: number,
-  snapState: SnapState
+  snapState: SnapState,
+  anchorMode?: AnchorMode
 ): SnapResult {
   const guides: AlignmentGuide[] = [];
   let snapLeft: number | undefined;
@@ -46,10 +124,6 @@ export function calculateAlignmentGuides(
   const objectBounds = activeObject.getBoundingRect();
   const objectCenterX = objectBounds.left + objectBounds.width / 2;
   const objectCenterY = objectBounds.top + objectBounds.height / 2;
-  const objectLeft = objectBounds.left;
-  const objectRight = objectBounds.left + objectBounds.width;
-  const objectTop = objectBounds.top;
-  const objectBottom = objectBounds.top + objectBounds.height;
 
   // Track closest snap point to avoid conflicts
   let closestVerticalSnap: { distance: number; left: number; guidePos: number; label?: string } | null = null;
@@ -75,6 +149,10 @@ export function calculateAlignmentGuides(
   // Use hysteresis: if already snapped, require larger distance to unsnap
   const verticalThreshold = isSnappedVertical ? SNAP_RELEASE_THRESHOLD : SNAP_THRESHOLD;
 
+  // Determine which horizontal anchor to use (default to center)
+  const horizontalAnchor = anchorMode?.horizontal || 'center';
+  const anchorX = getHorizontalAnchorPosition(objectBounds, horizontalAnchor);
+
   for (const check of verticalChecks) {
     // If we're snapped to a specific guide, only check that guide with the release threshold
     // This prevents competing with other nearby guides
@@ -82,40 +160,13 @@ export function calculateAlignmentGuides(
       continue; // Skip other guides when already snapped to a specific one
     }
 
-    // Check object center - prioritize center snaps with weighting
-    const centerDist = Math.abs(objectCenterX - check.pos);
-    const adjustedCenterDist = centerDist * CENTER_SNAP_WEIGHT;
-    if (centerDist < verticalThreshold) {
-      if (!closestVerticalSnap || adjustedCenterDist < closestVerticalSnap.distance) {
+    // Check ONLY the active anchor point (single check instead of 3)
+    const anchorDist = Math.abs(anchorX - check.pos);
+    if (anchorDist < verticalThreshold) {
+      if (!closestVerticalSnap || anchorDist < closestVerticalSnap.distance) {
         closestVerticalSnap = {
-          distance: adjustedCenterDist,
-          left: check.pos - objectBounds.width / 2,
-          guidePos: check.pos,
-          label: check.label,
-        };
-      }
-    }
-
-    // Check object left edge
-    const leftDist = Math.abs(objectLeft - check.pos);
-    if (leftDist < verticalThreshold) {
-      if (!closestVerticalSnap || leftDist < closestVerticalSnap.distance) {
-        closestVerticalSnap = {
-          distance: leftDist,
-          left: check.pos,
-          guidePos: check.pos,
-          label: check.label,
-        };
-      }
-    }
-
-    // Check object right edge
-    const rightDist = Math.abs(objectRight - check.pos);
-    if (rightDist < verticalThreshold) {
-      if (!closestVerticalSnap || rightDist < closestVerticalSnap.distance) {
-        closestVerticalSnap = {
-          distance: rightDist,
-          left: check.pos - objectBounds.width,
+          distance: anchorDist,
+          left: calculateSnapLeft(check.pos, objectBounds, horizontalAnchor),
           guidePos: check.pos,
           label: check.label,
         };
@@ -151,6 +202,10 @@ export function calculateAlignmentGuides(
   // Use hysteresis: if already snapped, require larger distance to unsnap
   const horizontalThreshold = isSnappedHorizontal ? SNAP_RELEASE_THRESHOLD : SNAP_THRESHOLD;
 
+  // Determine which vertical anchor to use (default to center)
+  const verticalAnchor = anchorMode?.vertical || 'center';
+  const anchorY = getVerticalAnchorPosition(objectBounds, verticalAnchor);
+
   for (const check of horizontalChecks) {
     // If we're snapped to a specific guide, only check that guide with the release threshold
     // This prevents competing with other nearby guides
@@ -158,40 +213,13 @@ export function calculateAlignmentGuides(
       continue; // Skip other guides when already snapped to a specific one
     }
 
-    // Check object center - prioritize center snaps with weighting
-    const centerDist = Math.abs(objectCenterY - check.pos);
-    const adjustedCenterDist = centerDist * CENTER_SNAP_WEIGHT;
-    if (centerDist < horizontalThreshold) {
-      if (!closestHorizontalSnap || adjustedCenterDist < closestHorizontalSnap.distance) {
+    // Check ONLY the active anchor point (single check instead of 3)
+    const anchorDist = Math.abs(anchorY - check.pos);
+    if (anchorDist < horizontalThreshold) {
+      if (!closestHorizontalSnap || anchorDist < closestHorizontalSnap.distance) {
         closestHorizontalSnap = {
-          distance: adjustedCenterDist,
-          top: check.pos - objectBounds.height / 2,
-          guidePos: check.pos,
-          label: check.label,
-        };
-      }
-    }
-
-    // Check object top edge
-    const topDist = Math.abs(objectTop - check.pos);
-    if (topDist < horizontalThreshold) {
-      if (!closestHorizontalSnap || topDist < closestHorizontalSnap.distance) {
-        closestHorizontalSnap = {
-          distance: topDist,
-          top: check.pos,
-          guidePos: check.pos,
-          label: check.label,
-        };
-      }
-    }
-
-    // Check object bottom edge
-    const bottomDist = Math.abs(objectBottom - check.pos);
-    if (bottomDist < horizontalThreshold) {
-      if (!closestHorizontalSnap || bottomDist < closestHorizontalSnap.distance) {
-        closestHorizontalSnap = {
-          distance: bottomDist,
-          top: check.pos - objectBounds.height,
+          distance: anchorDist,
+          top: calculateSnapTop(check.pos, objectBounds, verticalAnchor),
           guidePos: check.pos,
           label: check.label,
         };
@@ -220,91 +248,75 @@ export function calculateAlignmentGuides(
     if (obj === activeObject || !obj.visible || obj.selectable === false) return;
 
     const otherBounds = obj.getBoundingRect();
-    const otherCenterX = otherBounds.left + otherBounds.width / 2;
-    const otherCenterY = otherBounds.top + otherBounds.height / 2;
 
-    // Vertical alignment with other objects (only if no snap yet or closer)
-    const centerXDist = Math.abs(objectCenterX - otherCenterX);
-    if (centerXDist < SNAP_THRESHOLD) {
-      if (!closestVerticalSnap || centerXDist < closestVerticalSnap.distance) {
-        snapLeft = otherCenterX - objectBounds.width / 2;
+    if (anchorMode) {
+      // Use the active anchor against the same anchor on other objects
+      const otherAnchorX = getHorizontalAnchorPosition(otherBounds, horizontalAnchor);
+      const dist = Math.abs(anchorX - otherAnchorX);
+
+      if (dist < SNAP_THRESHOLD && (!closestVerticalSnap || dist < closestVerticalSnap.distance)) {
+        snapLeft = calculateSnapLeft(otherAnchorX, objectBounds, horizontalAnchor);
         // Remove previous vertical guide
         const idx = guides.findIndex((g) => g.type === 'vertical');
         if (idx >= 0) guides.splice(idx, 1);
         guides.push({
           type: 'vertical',
-          position: otherCenterX,
+          position: otherAnchorX,
           color: '#00E676',
         });
+        closestVerticalSnap = { distance: dist, left: snapLeft, guidePos: otherAnchorX };
       }
-    }
 
-    // Horizontal alignment with other objects (only if no snap yet or closer)
-    const centerYDist = Math.abs(objectCenterY - otherCenterY);
-    if (centerYDist < SNAP_THRESHOLD) {
-      if (!closestHorizontalSnap || centerYDist < closestHorizontalSnap.distance) {
-        snapTop = otherCenterY - objectBounds.height / 2;
+      // Use the active vertical anchor against the same anchor on other objects
+      const otherAnchorY = getVerticalAnchorPosition(otherBounds, verticalAnchor);
+      const vdist = Math.abs(anchorY - otherAnchorY);
+
+      if (vdist < SNAP_THRESHOLD && (!closestHorizontalSnap || vdist < closestHorizontalSnap.distance)) {
+        snapTop = calculateSnapTop(otherAnchorY, objectBounds, verticalAnchor);
         // Remove previous horizontal guide
         const idx = guides.findIndex((g) => g.type === 'horizontal');
         if (idx >= 0) guides.splice(idx, 1);
         guides.push({
           type: 'horizontal',
-          position: otherCenterY,
+          position: otherAnchorY,
           color: '#00E676',
         });
+        closestHorizontalSnap = { distance: vdist, top: snapTop, guidePos: otherAnchorY };
       }
-    }
+    } else {
+      // Fallback to center-only snapping for backward compatibility
+      const otherCenterX = otherBounds.left + otherBounds.width / 2;
+      const otherCenterY = otherBounds.top + otherBounds.height / 2;
 
-    // Left edge alignment
-    const leftEdgeDist = Math.abs(objectLeft - otherBounds.left);
-    if (leftEdgeDist < SNAP_THRESHOLD && (!closestVerticalSnap || leftEdgeDist < closestVerticalSnap.distance)) {
-      snapLeft = otherBounds.left;
-      const idx = guides.findIndex((g) => g.type === 'vertical');
-      if (idx >= 0) guides.splice(idx, 1);
-      guides.push({
-        type: 'vertical',
-        position: otherBounds.left,
-        color: '#00E676',
-      });
-    }
+      // Vertical alignment (center to center)
+      const centerXDist = Math.abs(objectCenterX - otherCenterX);
+      if (centerXDist < SNAP_THRESHOLD) {
+        if (!closestVerticalSnap || centerXDist < closestVerticalSnap.distance) {
+          snapLeft = otherCenterX - objectBounds.width / 2;
+          const idx = guides.findIndex((g) => g.type === 'vertical');
+          if (idx >= 0) guides.splice(idx, 1);
+          guides.push({
+            type: 'vertical',
+            position: otherCenterX,
+            color: '#00E676',
+          });
+        }
+      }
 
-    // Right edge alignment
-    const rightEdgeDist = Math.abs(objectRight - (otherBounds.left + otherBounds.width));
-    if (rightEdgeDist < SNAP_THRESHOLD && (!closestVerticalSnap || rightEdgeDist < closestVerticalSnap.distance)) {
-      snapLeft = otherBounds.left + otherBounds.width - objectBounds.width;
-      const idx = guides.findIndex((g) => g.type === 'vertical');
-      if (idx >= 0) guides.splice(idx, 1);
-      guides.push({
-        type: 'vertical',
-        position: otherBounds.left + otherBounds.width,
-        color: '#00E676',
-      });
-    }
-
-    // Top edge alignment
-    const topEdgeDist = Math.abs(objectTop - otherBounds.top);
-    if (topEdgeDist < SNAP_THRESHOLD && (!closestHorizontalSnap || topEdgeDist < closestHorizontalSnap.distance)) {
-      snapTop = otherBounds.top;
-      const idx = guides.findIndex((g) => g.type === 'horizontal');
-      if (idx >= 0) guides.splice(idx, 1);
-      guides.push({
-        type: 'horizontal',
-        position: otherBounds.top,
-        color: '#00E676',
-      });
-    }
-
-    // Bottom edge alignment
-    const bottomEdgeDist = Math.abs(objectBottom - (otherBounds.top + otherBounds.height));
-    if (bottomEdgeDist < SNAP_THRESHOLD && (!closestHorizontalSnap || bottomEdgeDist < closestHorizontalSnap.distance)) {
-      snapTop = otherBounds.top + otherBounds.height - objectBounds.height;
-      const idx = guides.findIndex((g) => g.type === 'horizontal');
-      if (idx >= 0) guides.splice(idx, 1);
-      guides.push({
-        type: 'horizontal',
-        position: otherBounds.top + otherBounds.height,
-        color: '#00E676',
-      });
+      // Horizontal alignment (center to center)
+      const centerYDist = Math.abs(objectCenterY - otherCenterY);
+      if (centerYDist < SNAP_THRESHOLD) {
+        if (!closestHorizontalSnap || centerYDist < closestHorizontalSnap.distance) {
+          snapTop = otherCenterY - objectBounds.height / 2;
+          const idx = guides.findIndex((g) => g.type === 'horizontal');
+          if (idx >= 0) guides.splice(idx, 1);
+          guides.push({
+            type: 'horizontal',
+            position: otherCenterY,
+            color: '#00E676',
+          });
+        }
+      }
     }
   });
 

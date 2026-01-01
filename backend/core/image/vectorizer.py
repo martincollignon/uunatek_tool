@@ -3,11 +3,40 @@
 import subprocess
 import tempfile
 import logging
+import sys
+import os
 from pathlib import Path
 from PIL import Image
 import io
 
 logger = logging.getLogger(__name__)
+
+
+def find_potrace():
+    """
+    Find potrace executable, checking bundled location first (for PyInstaller),
+    then system PATH.
+
+    Returns:
+        Path to potrace executable, or None if not found
+    """
+    # Check if running as a PyInstaller bundle
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # Running in a PyInstaller bundle
+        bundled_potrace = os.path.join(sys._MEIPASS, 'potrace')
+        if os.path.exists(bundled_potrace):
+            logger.info(f"Using bundled potrace: {bundled_potrace}")
+            return bundled_potrace
+
+    # Fall back to system PATH
+    import shutil
+    potrace_path = shutil.which('potrace')
+    if potrace_path:
+        logger.info(f"Using system potrace: {potrace_path}")
+        return potrace_path
+
+    logger.error("potrace not found in bundle or system PATH")
+    return None
 
 
 class ImageVectorizer:
@@ -49,8 +78,13 @@ class ImageVectorizer:
                 # Save as BMP (potrace's preferred format)
                 img.save(bmp_path, 'BMP')
 
+                # Find potrace executable
+                potrace_exe = find_potrace()
+                if not potrace_exe:
+                    raise RuntimeError("potrace executable not found. Cannot vectorize image.")
+
                 # Build potrace command
-                cmd = ['potrace', '--svg', '--output', '-']
+                cmd = [potrace_exe, '--svg', '--output', '-']
 
                 # Add options
                 turdsize = options.get('turdsize', 2)
