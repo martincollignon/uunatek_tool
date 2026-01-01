@@ -16,6 +16,7 @@ interface GridOverlayProps {
   canvasHeightMm: number;
   pixelsPerMm: number;
   zoom: number;
+  isRotated?: boolean;
 }
 
 export function GridOverlay({
@@ -24,7 +25,8 @@ export function GridOverlay({
   canvasWidthMm,
   canvasHeightMm,
   pixelsPerMm,
-  zoom
+  zoom,
+  isRotated = false
 }: GridOverlayProps) {
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const snapThreshold = 5; // pixels
@@ -48,8 +50,9 @@ export function GridOverlay({
     ctx.globalAlpha = config.opacity;
     ctx.lineWidth = 1;
 
-    // Draw vertical lines
-    const numVerticalLines = Math.ceil(canvasWidthMm / config.spacing);
+    // Draw vertical lines - when rotated, the grid orientation swaps
+    const verticalDimension = isRotated ? canvasHeightMm : canvasWidthMm;
+    const numVerticalLines = Math.ceil(verticalDimension / config.spacing);
     for (let i = 0; i <= numVerticalLines; i++) {
       const x = i * spacingPx;
       ctx.beginPath();
@@ -58,8 +61,9 @@ export function GridOverlay({
       ctx.stroke();
     }
 
-    // Draw horizontal lines
-    const numHorizontalLines = Math.ceil(canvasHeightMm / config.spacing);
+    // Draw horizontal lines - when rotated, the grid orientation swaps
+    const horizontalDimension = isRotated ? canvasWidthMm : canvasHeightMm;
+    const numHorizontalLines = Math.ceil(horizontalDimension / config.spacing);
     for (let i = 0; i <= numHorizontalLines; i++) {
       const y = i * spacingPx;
       ctx.beginPath();
@@ -69,7 +73,7 @@ export function GridOverlay({
     }
 
     ctx.globalAlpha = 1;
-  }, [config, canvasWidthMm, canvasHeightMm, pixelsPerMm, zoom]);
+  }, [config, canvasWidthMm, canvasHeightMm, pixelsPerMm, zoom, isRotated]);
 
   // Setup snap-to-grid functionality
   useEffect(() => {
@@ -192,8 +196,13 @@ export function GridOverlay({
 
   if (!config.enabled) return null;
 
-  const width = canvasWidthMm * pixelsPerMm * zoom;
-  const height = canvasHeightMm * pixelsPerMm * zoom;
+  // Swap dimensions when rotated to match the rotated canvas visual
+  const width = isRotated
+    ? canvasHeightMm * pixelsPerMm * zoom
+    : canvasWidthMm * pixelsPerMm * zoom;
+  const height = isRotated
+    ? canvasWidthMm * pixelsPerMm * zoom
+    : canvasHeightMm * pixelsPerMm * zoom;
 
   return (
     <canvas

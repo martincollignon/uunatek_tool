@@ -1,25 +1,38 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Play, Pause, Square, Check, RotateCcw, Mail, Home } from 'lucide-react';
+import { ArrowLeft, Play, Pause, Square, Check, RotateCcw, Mail, Home, AlertCircle } from 'lucide-react';
 import { useProjectStore } from '../stores/projectStore';
 import { usePlotterStore } from '../stores/plotterStore';
 import { useWorkflowStore } from '../stores/workflowStore';
 import { WorkflowStepper } from '../components/workflow/WorkflowStepper';
 import { PlotProgress } from '../components/workflow/PlotProgress';
 import { PlotterControls } from '../components/workflow/PlotterControls';
-import { canvasApi } from '../services/api';
+import { svgToPlotCommands } from '../lib/plotter';
+import { exportCanvasSvg } from '../lib/canvas/fabricToSvg';
+import * as projectDB from '../services/projectDB';
+import { PAPER_DIMENSIONS } from '../types';
 
 export function PlotPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const navigate = useNavigate();
   const { currentProject, loadProject, isLoading: projectLoading } = useProjectStore();
-  const { status: plotterStatus, startPlot, pausePlot, resumePlot, cancelPlot, plotProgress, fetchPlotStatus, home } = usePlotterStore();
+  const {
+    status: plotterStatus,
+    plotProgress,
+    startPlot,
+    pausePlot,
+    resumePlot,
+    cancelPlot,
+    home,
+    setCanvasSize,
+    isSerialSupported,
+  } = usePlotterStore();
   const { currentStep, setStep, resetWorkflow, loadWorkflow, saveWorkflow } = useWorkflowStore();
 
   const [svgPreview, setSvgPreview] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [isLoadingSvg, setIsLoadingSvg] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [isStartingPlot, setIsStartingPlot] = useState(false);
 
   useEffect(() => {
     if (projectId) {
@@ -31,32 +44,35 @@ export function PlotPage() {
       });
       loadWorkflow(projectId);
     }
-  }, [projectId, loadProject, loadWorkflow, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
-  // Poll plot status during plotting
+  // Set canvas size when project loads
   useEffect(() => {
-    if (currentStep.includes('plotting')) {
-      intervalRef.current = setInterval(() => {
-        fetchPlotStatus();
-      }, 500);
+    if (currentProject) {
+      setCanvasSize(currentProject.width_mm, currentProject.height_mm);
     }
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
-  }, [currentStep, fetchPlotStatus]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProject]);
 
-  // Check if plot completed
+  // Check if plot completed (using new progress format)
+  // The new store uses event handlers, so plotProgress updates automatically
   useEffect(() => {
-    if (plotProgress?.status === 'completed' && currentStep.includes('plotting')) {
+    if (!plotProgress) return;
+
+    // Handle both old format (status) and new format (state)
+    const progressState = 'state' in plotProgress
+      ? plotProgress.state
+      : (plotProgress as unknown as { status?: string }).status;
+
+    if (progressState === 'completed' && currentStep.includes('plotting')) {
       // Move to confirm step
       if (currentStep === 'plotting_side1') setStep('confirm_side1');
       else if (currentStep === 'plotting_side2') setStep('confirm_side2');
       else if (currentStep === 'plotting_envelope') setStep('confirm_envelope');
     }
-  }, [plotProgress, currentStep, setStep]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plotProgress, currentStep]);
 
   const getCurrentSide = useCallback((): 'front' | 'back' | 'envelope' => {
     if (currentStep.includes('side1') || currentStep === 'editing' || currentStep === 'idle') {
@@ -69,27 +85,43 @@ export function PlotPage() {
   }, [currentStep]);
 
   const loadSvgPreview = useCallback(async () => {
-    if (!projectId) return;
+    if (!projectId || !currentProject) return;
     setIsLoadingSvg(true);
     try {
       const side = getCurrentSide();
-      const response = await canvasApi.exportSvg(projectId, side);
+
+      // Get canvas data from IndexedDB
+      const canvasJson = await projectDB.getCanvas(projectId, side as 'front' | 'back');
+
+      // Get paper dimensions
+      const paperSize = currentProject.paper_size;
+      let widthMm = PAPER_DIMENSIONS[paperSize]?.width || 210;
+      let heightMm = PAPER_DIMENSIONS[paperSize]?.height || 297;
+
+      if (paperSize === 'custom') {
+        widthMm = currentProject.custom_width_mm || 210;
+        heightMm = currentProject.custom_height_mm || 297;
+      }
+
+      // Export to SVG
+      const response = await exportCanvasSvg(canvasJson, widthMm, heightMm);
       setSvgPreview(response.svg);
       setWarnings(response.warnings);
     } catch (err) {
       console.error('Failed to load SVG preview:', err);
-      setWarnings([]);
+      setWarnings(['Failed to generate SVG preview']);
     } finally {
       setIsLoadingSvg(false);
     }
-  }, [projectId, getCurrentSide]);
+  }, [projectId, currentProject, getCurrentSide]);
 
   // Load SVG preview when entering preview step
   useEffect(() => {
     if (currentStep.includes('preview') && projectId) {
       loadSvgPreview();
     }
-  }, [currentStep, projectId, loadSvgPreview]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep, projectId]);
 
   // Initialize workflow on mount
   useEffect(() => {
@@ -97,30 +129,59 @@ export function PlotPage() {
       setStep('preview_side1');
       saveWorkflow(currentProject.id);
     }
-  }, [currentProject, currentStep, setStep, saveWorkflow]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProject, currentStep]);
 
   const handleStartPlot = async () => {
-    if (!projectId) return;
-    const side = getCurrentSide();
+    if (!projectId || !svgPreview || !currentProject) return;
 
-    if (currentStep === 'preview_side1') setStep('plotting_side1');
-    else if (currentStep === 'preview_side2') setStep('plotting_side2');
-    else if (currentStep === 'preview_envelope') setStep('plotting_envelope');
+    setIsStartingPlot(true);
+    try {
+      const side = getCurrentSide();
 
-    await startPlot(projectId, side);
-    if (projectId) saveWorkflow(projectId);
+      // Convert SVG to plot commands using the new TypeScript layer
+      const commands = svgToPlotCommands(svgPreview, {
+        canvasWidthMm: currentProject.width_mm,
+        canvasHeightMm: currentProject.height_mm,
+        safetyMarginMm: 3,
+        optimizePaths: true,
+      });
+
+      if (commands.length === 0) {
+        console.warn('No plottable content found in SVG');
+        setIsStartingPlot(false);
+        return;
+      }
+
+      // Update workflow step
+      if (currentStep === 'preview_side1') setStep('plotting_side1');
+      else if (currentStep === 'preview_side2') setStep('plotting_side2');
+      else if (currentStep === 'preview_envelope') setStep('plotting_envelope');
+
+      // Start plotting with the commands
+      await startPlot(commands, side);
+      if (projectId) saveWorkflow(projectId);
+    } catch (err) {
+      console.error('Failed to start plot:', err);
+      // Revert to preview step on error
+      if (currentStep === 'plotting_side1') setStep('preview_side1');
+      else if (currentStep === 'plotting_side2') setStep('preview_side2');
+      else if (currentStep === 'plotting_envelope') setStep('preview_envelope');
+    } finally {
+      setIsStartingPlot(false);
+    }
   };
 
-  const handlePause = async () => {
-    await pausePlot();
+  const handlePause = () => {
+    pausePlot();
   };
 
-  const handleResume = async () => {
-    await resumePlot();
+  const handleResume = () => {
+    resumePlot();
   };
 
-  const handleCancel = async () => {
-    await cancelPlot();
+  const handleCancel = () => {
+    cancelPlot();
     // Go back to preview
     if (currentStep === 'plotting_side1') setStep('preview_side1');
     else if (currentStep === 'plotting_side2') setStep('preview_side2');
@@ -206,7 +267,11 @@ export function PlotPage() {
             {currentProject.is_double_sided && ' • Double-sided'}
             {currentProject.include_envelope && ' • With envelope'}
           </span>
-          {plotProgress?.status === 'paused' && plotterStatus?.connected && (
+          {/* Check for paused state in both old and new format */}
+          {(plotProgress && (
+            ('state' in plotProgress && plotProgress.state === 'paused') ||
+            ('status' in plotProgress && (plotProgress as { status?: string }).status === 'paused')
+          )) && plotterStatus?.connected && (
             <button
               className="btn btn-secondary"
               onClick={handleHome}
@@ -294,15 +359,26 @@ export function PlotPage() {
                     <p>Loading preview...</p>
                   ) : svgPreview ? (
                     <div
-                      dangerouslySetInnerHTML={{ __html: svgPreview }}
                       style={{
-                        maxWidth: '100%',
-                        maxHeight: 400,
+                        width: '100%',
                         background: 'white',
                         borderRadius: 'var(--radius)',
                         padding: 16,
+                        display: 'flex',
+                        justifyContent: 'center',
+                        alignItems: 'center',
                       }}
-                    />
+                    >
+                      <div
+                        dangerouslySetInnerHTML={{ __html: svgPreview }}
+                        style={{
+                          // Force SVG to render at our editor scale (3px per mm)
+                          // This matches the canvas editor scale
+                          width: currentProject ? `${currentProject.width_mm * 3}px` : 'auto',
+                          height: currentProject ? `${currentProject.height_mm * 3}px` : 'auto',
+                        }}
+                      />
+                    </div>
                   ) : (
                     <p style={{ color: 'var(--color-text-secondary)' }}>No content to preview</p>
                   )}
@@ -385,20 +461,46 @@ export function PlotPage() {
           {/* Action buttons */}
           <div className="plot-actions" style={{ marginTop: 24 }}>
             {isPreview && (
-              <button
-                className="btn btn-primary"
-                onClick={handleStartPlot}
-                disabled={!plotterStatus?.connected}
-                style={{ minWidth: 200 }}
-              >
-                <Play size={16} />
-                Start Plotting
-              </button>
+              <>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleStartPlot}
+                  disabled={!plotterStatus?.connected || isStartingPlot || !svgPreview}
+                  style={{ minWidth: 200 }}
+                >
+                  <Play size={16} />
+                  {isStartingPlot ? 'Preparing...' : 'Start Plotting'}
+                </button>
+
+                {!isSerialSupported && (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      padding: 12,
+                      background: 'rgba(245, 158, 11, 0.1)',
+                      border: '1px solid rgba(245, 158, 11, 0.3)',
+                      borderRadius: 'var(--radius)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <AlertCircle size={16} style={{ color: 'var(--color-warning)' }} />
+                    <span style={{ color: 'var(--color-warning)', fontSize: '0.8125rem' }}>
+                      Your browser doesn't support serial connections. Use Chrome, Edge, or the desktop app.
+                    </span>
+                  </div>
+                )}
+              </>
             )}
 
             {isPlotting && (
               <div className="flex gap-2">
-                {plotProgress?.status === 'paused' ? (
+                {/* Check for paused state in both formats */}
+                {(plotProgress && (
+                  ('state' in plotProgress && plotProgress.state === 'paused') ||
+                  ('status' in plotProgress && (plotProgress as { status?: string }).status === 'paused')
+                )) ? (
                   <button className="btn btn-primary" onClick={handleResume}>
                     <Play size={16} />
                     Resume
@@ -431,7 +533,7 @@ export function PlotPage() {
               </button>
             )}
 
-            {!plotterStatus?.connected && isPreview && (
+            {!plotterStatus?.connected && isPreview && isSerialSupported && (
               <p
                 style={{
                   color: 'var(--color-warning)',

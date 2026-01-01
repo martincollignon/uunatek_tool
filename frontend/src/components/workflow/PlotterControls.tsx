@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plug, Unplug, Home, ChevronUp, ChevronDown, RefreshCw, Crosshair } from 'lucide-react';
+import { Plug, Unplug, Home, ChevronUp, ChevronDown, RefreshCw, Crosshair, AlertCircle } from 'lucide-react';
 import { usePlotterStore } from '../../stores/plotterStore';
+import { isSerialAvailable, getSerialSupportMessage } from '../../lib/serial';
 import { CalibrationWizard } from '../calibration/CalibrationWizard';
 
 export function PlotterControls() {
@@ -8,48 +9,102 @@ export function PlotterControls() {
     status,
     availablePorts,
     isConnecting,
-    fetchStatus,
+    error,
+    initialize,
     listPorts,
     connect,
     disconnect,
     home,
     penUp,
     penDown,
+    clearError,
   } = usePlotterStore();
 
   const [selectedPort, setSelectedPort] = useState<string>('');
   const [showCalibration, setShowCalibration] = useState(false);
+  const [hasAttemptedAutoConnect, setHasAttemptedAutoConnect] = useState(false);
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollingErrorCountRef = useRef(0);
 
-  // Initial fetch on mount
+  // Check if serial is supported
+  const serialSupported = isSerialAvailable();
+  const supportMessage = getSerialSupportMessage();
+
+  // Initialize plotter store on mount
   useEffect(() => {
-    fetchStatus();
-    listPorts();
-  }, [fetchStatus, listPorts]);
+    initialize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Initial port listing on mount
+  useEffect(() => {
+    if (serialSupported) {
+      listPorts();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serialSupported]);
 
   // Auto-select first available port
   useEffect(() => {
     if (availablePorts.length > 0 && !selectedPort) {
-      setSelectedPort(availablePorts[0].device);
+      setSelectedPort(availablePorts[0].path);
     }
   }, [availablePorts, selectedPort]);
 
-  // Auto-connect to first available device
+  // Safe auto-connect with debouncing - only attempts once per session
   useEffect(() => {
-    if (availablePorts.length > 0 && !status?.connected && !isConnecting && selectedPort) {
-      // Automatically connect to the selected port
-      connect(selectedPort);
-    }
-  }, [availablePorts, status?.connected, isConnecting, selectedPort, connect]);
+    // Only attempt once
+    if (hasAttemptedAutoConnect) return;
 
-  // Automatic hardware polling when disconnected
+    // Check all conditions
+    if (serialSupported && availablePorts.length > 0 && !status?.connected && !isConnecting && selectedPort) {
+      // Debounce: wait 1 second after ports are discovered
+      const timeoutId = setTimeout(async () => {
+        try {
+          console.log('[PlotterControls] Auto-connecting to:', selectedPort);
+          await connect(selectedPort);
+          setHasAttemptedAutoConnect(true);
+        } catch (err) {
+          console.error('[PlotterControls] Auto-connect failed:', err);
+          // Still mark as attempted to prevent infinite retries
+          setHasAttemptedAutoConnect(true);
+        }
+      }, 1000);
+
+      return () => clearTimeout(timeoutId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serialSupported, availablePorts.length, status?.connected, isConnecting, selectedPort, hasAttemptedAutoConnect]);
+
+  // Safe hardware polling with safeguards (5-second interval, error handling)
   useEffect(() => {
+    if (!serialSupported) return;
+
     // Only poll when disconnected
     if (!status?.connected) {
-      // Poll every 2 seconds for hardware changes
-      pollingIntervalRef.current = setInterval(() => {
-        listPorts();
-      }, 2000);
+      // Reset error count when starting fresh polling
+      pollingErrorCountRef.current = 0;
+
+      // Poll every 5 seconds for hardware changes (increased from 2s to reduce load)
+      pollingIntervalRef.current = setInterval(async () => {
+        try {
+          await listPorts();
+          // Reset error count on success
+          pollingErrorCountRef.current = 0;
+        } catch (err) {
+          console.error('[PlotterControls] Port listing failed:', err);
+          pollingErrorCountRef.current++;
+
+          // Stop polling after 3 consecutive errors to prevent infinite retry loops
+          if (pollingErrorCountRef.current >= 3) {
+            console.warn('[PlotterControls] Stopping polling due to repeated errors');
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+          }
+        }
+      }, 5000);
     } else {
       // Clear polling when connected
       if (pollingIntervalRef.current) {
@@ -62,11 +117,14 @@ export function PlotterControls() {
     return () => {
       if (pollingIntervalRef.current) {
         clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
       }
     };
-  }, [status?.connected, listPorts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serialSupported, status?.connected]);
 
   const handleConnect = async () => {
+    clearError();
     await connect(selectedPort || undefined);
   };
 
@@ -74,9 +132,76 @@ export function PlotterControls() {
     listPorts();
   };
 
+  // Unsupported browser UI
+  if (!serialSupported) {
+    return (
+      <div className="plotter-controls">
+        <h3 style={{ marginBottom: 16, fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+          Plotter Connection
+        </h3>
+        <div
+          style={{
+            padding: 16,
+            background: 'rgba(245, 158, 11, 0.1)',
+            border: '1px solid rgba(245, 158, 11, 0.3)',
+            borderRadius: 'var(--radius)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <AlertCircle size={20} style={{ color: 'var(--color-warning)', flexShrink: 0, marginTop: 2 }} />
+            <div>
+              <h4 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 8, color: 'var(--color-warning)' }}>
+                Browser Not Supported
+              </h4>
+              <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)', marginBottom: 12 }}>
+                {supportMessage}
+              </p>
+              <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
+                Please use <strong>Chrome</strong>, <strong>Edge</strong>, or <strong>Opera</strong> for web plotting,
+                or download the desktop app for full browser support.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="plotter-controls">
-      <h3 style={{ marginBottom: 16, fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Plotter Connection</h3>
+      <h3 style={{ marginBottom: 16, fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+        Plotter Connection
+      </h3>
+
+      {/* Error display */}
+      {error && (
+        <div
+          style={{
+            padding: 12,
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid var(--color-error)',
+            borderRadius: 'var(--radius)',
+            marginBottom: 16,
+            fontSize: '0.8125rem',
+            color: 'var(--color-error)',
+          }}
+        >
+          {error}
+          <button
+            onClick={clearError}
+            style={{
+              marginLeft: 8,
+              background: 'none',
+              border: 'none',
+              color: 'var(--color-error)',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {!status?.connected ? (
         <div className="connection-controls">
@@ -93,8 +218,8 @@ export function PlotterControls() {
                   <option value="">No ports found</option>
                 ) : (
                   availablePorts.map((port) => (
-                    <option key={port.device} value={port.device}>
-                      {port.device} {port.description && `(${port.description})`}
+                    <option key={port.path} value={port.path}>
+                      {port.path} {port.description && `(${port.description})`}
                     </option>
                   ))
                 )}
@@ -133,12 +258,7 @@ export function PlotterControls() {
             <div style={{ color: 'var(--color-success)', fontWeight: 500, marginBottom: 4 }}>
               Connected
             </div>
-            <div style={{ color: 'var(--color-text-secondary)' }}>{status.port}</div>
-            {status.firmware_version && (
-              <div style={{ color: 'var(--color-text-secondary)', fontSize: '0.75rem' }}>
-                Firmware: {status.firmware_version}
-              </div>
-            )}
+            <div style={{ color: 'var(--color-text-secondary)' }}>{status.portName}</div>
           </div>
 
           <div className="flex gap-2" style={{ marginBottom: 12 }}>
@@ -182,7 +302,6 @@ export function PlotterControls() {
         <CalibrationWizard
           onClose={() => {
             setShowCalibration(false);
-            fetchStatus();
           }}
         />
       )}

@@ -1,20 +1,44 @@
+/**
+ * Plotter Store - Zustand store for plotter state management.
+ *
+ * This version uses the TypeScript serial layer instead of the Python backend API.
+ * It can be used in both web (Web Serial API) and desktop (Tauri) environments.
+ */
+
 import { create } from 'zustand';
-import type { PlotterStatus, PlotProgress, SerialPort } from '../types';
-import type { PlotterError, RecoveryAction } from '../types/errors';
-import { plotterApi } from '../services/api';
+import {
+  getPlotterService,
+  PlotterService,
+  PlotterStatus,
+  PlotterServiceState,
+  PlotCommand,
+  PlotProgress,
+} from '../lib/plotter';
+import { SerialPortInfo, isSerialAvailable, getSerialSupportMessage } from '../lib/serial';
 
 interface PlotterState {
+  // Connection state
   status: PlotterStatus | null;
-  plotProgress: PlotProgress | null;
-  availablePorts: SerialPort[];
+  serviceState: PlotterServiceState;
+  availablePorts: SerialPortInfo[];
   isConnecting: boolean;
+
+  // Plot state
+  plotProgress: PlotProgress | null;
+  isPlotting: boolean;
+
+  // Error state
   error: string | null;
-  // Structured error state
-  currentError: PlotterError | null;
-  showProblemDialog: boolean;
+
+  // Environment info
+  isSerialSupported: boolean;
+  serialSupportMessage: string;
+
+  // Service reference
+  service: PlotterService;
 
   // Actions
-  fetchStatus: () => Promise<void>;
+  initialize: () => void;
   listPorts: () => Promise<void>;
   connect: (port?: string) => Promise<void>;
   disconnect: () => Promise<void>;
@@ -23,244 +47,227 @@ interface PlotterState {
   penDown: () => Promise<void>;
   enableMotors: () => Promise<void>;
   disableMotors: () => Promise<void>;
-  startPlot: (projectId: string, side: string) => Promise<void>;
-  pausePlot: () => Promise<void>;
-  resumePlot: () => Promise<void>;
-  cancelPlot: () => Promise<void>;
-  fetchPlotStatus: () => Promise<void>;
-  updateProgress: (progress: PlotProgress) => void;
+  moveTo: (x: number, y: number, feedRate?: number) => Promise<void>;
+  emergencyStop: () => Promise<void>;
+  startPlot: (commands: PlotCommand[], side?: string) => Promise<boolean>;
+  pausePlot: () => void;
+  resumePlot: () => void;
+  cancelPlot: () => void;
   clearError: () => void;
-  // Error handling actions
-  setCurrentError: (error: PlotterError | null) => void;
-  handleRecoveryAction: (action: RecoveryAction) => Promise<void>;
-  reportProblem: (errorCode: string) => Promise<void>;
-  setShowProblemDialog: (show: boolean) => void;
+  setCanvasSize: (widthMm: number, heightMm: number) => void;
 }
 
-const initialStatus: PlotterStatus = {
-  connected: false,
-  pen_state: 'unknown',
-  motors_enabled: false,
-};
+export const usePlotterStore = create<PlotterState>((set) => {
+  // Get singleton service instance
+  const service = getPlotterService();
 
-// Helper to extract PlotterError from API response
-const extractError = (err: unknown): PlotterError | null => {
-  if (err && typeof err === 'object' && 'response' in err) {
-    const response = (err as { response?: { data?: { error?: PlotterError } } }).response;
-    if (response?.data?.error) {
-      return response.data.error;
-    }
-  }
-  return null;
-};
+  return {
+    // Initial state
+    status: null,
+    serviceState: 'disconnected',
+    availablePorts: [],
+    isConnecting: false,
+    plotProgress: null,
+    isPlotting: false,
+    error: null,
+    isSerialSupported: isSerialAvailable(),
+    serialSupportMessage: getSerialSupportMessage(),
+    service,
 
-export const usePlotterStore = create<PlotterState>((set) => ({
-  status: null,
-  plotProgress: null,
-  availablePorts: [],
-  isConnecting: false,
-  error: null,
-  currentError: null,
-  showProblemDialog: false,
-
-  fetchStatus: async () => {
-    try {
-      const status = await plotterApi.getStatus();
-      set({ status });
-    } catch (err) {
-      // Plotter might not be connected
-    }
-  },
-
-  listPorts: async () => {
-    try {
-      const ports = await plotterApi.listPorts();
-      set({ availablePorts: ports });
-    } catch (err) {
-      set({ error: 'Failed to list ports' });
-    }
-  },
-
-  connect: async (port?: string) => {
-    set({ isConnecting: true, error: null, currentError: null });
-    try {
-      await plotterApi.connect(port);
-      const status = await plotterApi.getStatus();
-      set({ status, isConnecting: false });
-    } catch (err: unknown) {
-      const plotterError = extractError(err);
-      if (plotterError) {
-        set({ currentError: plotterError, isConnecting: false, error: plotterError.message });
-      } else {
-        const message = err instanceof Error ? err.message : 'Failed to connect';
-        set({ error: message, isConnecting: false });
-      }
-    }
-  },
-
-  disconnect: async () => {
-    try {
-      await plotterApi.disconnect();
-      set({ status: initialStatus });
-    } catch (err) {
-      set({ error: 'Failed to disconnect' });
-    }
-  },
-
-  home: async () => {
-    try {
-      await plotterApi.home();
-    } catch (err) {
-      set({ error: 'Failed to home' });
-    }
-  },
-
-  penUp: async () => {
-    try {
-      await plotterApi.penUp();
-      set((state) => ({
-        status: state.status ? { ...state.status, pen_state: 'up' as const } : null,
-      }));
-    } catch (err) {
-      set({ error: 'Failed to raise pen' });
-    }
-  },
-
-  penDown: async () => {
-    try {
-      await plotterApi.penDown();
-      set((state) => ({
-        status: state.status ? { ...state.status, pen_state: 'down' as const } : null,
-      }));
-    } catch (err) {
-      set({ error: 'Failed to lower pen' });
-    }
-  },
-
-  enableMotors: async () => {
-    try {
-      await plotterApi.enableMotors();
-      set((state) => ({
-        status: state.status ? { ...state.status, motors_enabled: true } : null,
-      }));
-    } catch (err) {
-      set({ error: 'Failed to enable motors' });
-    }
-  },
-
-  disableMotors: async () => {
-    try {
-      await plotterApi.disableMotors();
-      set((state) => ({
-        status: state.status ? { ...state.status, motors_enabled: false } : null,
-      }));
-    } catch (err) {
-      set({ error: 'Failed to disable motors' });
-    }
-  },
-
-  startPlot: async (projectId: string, side: string) => {
-    set({ error: null });
-    try {
-      await plotterApi.startPlot(projectId, side);
-      set({
-        plotProgress: {
-          status: 'plotting',
-          current_command: 0,
-          total_commands: 0,
-          elapsed_time: 0,
-          estimated_remaining: 0,
-          current_side: side,
-        } as PlotProgress,
+    // Initialize event handlers
+    initialize: () => {
+      service.setEventHandlers({
+        onStateChange: (state) => {
+          set({
+            serviceState: state,
+            isPlotting: state === 'plotting' || state === 'paused',
+            isConnecting: state === 'connecting',
+          });
+        },
+        onStatusUpdate: (status) => {
+          set({ status });
+        },
+        onProgress: (progress) => {
+          set({ plotProgress: progress });
+        },
+        onError: (err) => {
+          console.error('[PlotterStore] Error:', err.message);
+          set({ error: err.message });
+        },
+        onDisconnect: () => {
+          set({
+            status: null,
+            serviceState: 'disconnected',
+            isConnecting: false,
+            isPlotting: false,
+          });
+        },
       });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to start plot';
-      set({ error: message });
-    }
-  },
+    },
 
-  pausePlot: async () => {
-    try {
-      await plotterApi.pausePlot();
-    } catch (err) {
-      set({ error: 'Failed to pause' });
-    }
-  },
-
-  resumePlot: async () => {
-    try {
-      await plotterApi.resumePlot();
-    } catch (err) {
-      set({ error: 'Failed to resume' });
-    }
-  },
-
-  cancelPlot: async () => {
-    try {
-      await plotterApi.cancelPlot();
-      set({ plotProgress: null });
-    } catch (err) {
-      set({ error: 'Failed to cancel' });
-    }
-  },
-
-  fetchPlotStatus: async () => {
-    try {
-      const progress = await plotterApi.getPlotStatus();
-      set({ plotProgress: progress });
-    } catch (err) {
-      // Ignore errors during polling
-    }
-  },
-
-  updateProgress: (progress) => set({ plotProgress: progress }),
-  clearError: () => set({ error: null, currentError: null }),
-
-  // Error handling actions
-  setCurrentError: (error) => set({ currentError: error }),
-
-  handleRecoveryAction: async (action: RecoveryAction) => {
-    try {
-      await plotterApi.executeRecoveryAction(action);
-
-      // Clear error state after successful recovery action
-      if (action === 'retry' || action === 'user_fix') {
-        set({ currentError: null, error: null });
+    listPorts: async () => {
+      try {
+        const ports = await service.listPorts();
+        set({ availablePorts: ports, error: null });
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        set({ error: `Failed to list ports: ${errorMessage}` });
       }
+    },
 
-      // Refresh status after certain actions
-      if (action === 'reconnect' || action === 'home' || action === 'abort') {
-        const status = await plotterApi.getStatus();
-        set({ status, currentError: null, error: null });
+    connect: async (port?: string) => {
+      set({ isConnecting: true, error: null });
+      try {
+        await service.connect(port);
+        set({
+          status: service.status,
+          serviceState: service.state,
+          isConnecting: false,
+        });
+      } catch (err) {
+        // Extract detailed error information
+        let errorMsg = 'Failed to connect';
+        if (err && typeof err === 'object') {
+          if ('detail' in err && err.detail) {
+            errorMsg = String(err.detail);
+          } else if ('message' in err && err.message) {
+            errorMsg = String(err.message);
+          }
+        } else if (err instanceof Error) {
+          errorMsg = err.message;
+        }
+        set({
+          error: errorMsg,
+          isConnecting: false,
+        });
       }
+    },
 
-      // Resume clears error state
-      if (action === 'resume') {
-        set({ currentError: null, error: null });
+    disconnect: async () => {
+      try {
+        await service.disconnect();
+        set({
+          status: null,
+          serviceState: 'disconnected',
+          plotProgress: null,
+        });
+      } catch (err) {
+        set({ error: err instanceof Error ? err.message : 'Failed to disconnect' });
       }
-    } catch (err) {
-      const plotterError = extractError(err);
-      if (plotterError) {
-        set({ currentError: plotterError, error: plotterError.message });
-      } else {
-        const message = err instanceof Error ? err.message : `Failed to ${action}`;
-        set({ error: message });
+    },
+
+    home: async () => {
+      try {
+        await service.home();
+        set({ error: null });
+      } catch (err) {
+        set({ error: err instanceof Error ? err.message : 'Failed to home' });
       }
-    }
-  },
+    },
 
-  reportProblem: async (errorCode: string) => {
-    try {
-      const result = await plotterApi.reportProblem(errorCode);
-      set({
-        currentError: result.error,
-        showProblemDialog: false,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to report problem';
-      set({ error: message, showProblemDialog: false });
-    }
-  },
+    penUp: async () => {
+      try {
+        await service.penUp();
+        set({ error: null });
+      } catch (err) {
+        set({ error: err instanceof Error ? err.message : 'Failed to raise pen' });
+      }
+    },
 
-  setShowProblemDialog: (show) => set({ showProblemDialog: show }),
-}));
+    penDown: async () => {
+      try {
+        await service.penDown();
+        set({ error: null });
+      } catch (err) {
+        set({ error: err instanceof Error ? err.message : 'Failed to lower pen' });
+      }
+    },
+
+    enableMotors: async () => {
+      try {
+        await service.enableMotors();
+        set({ error: null });
+      } catch (err) {
+        set({ error: err instanceof Error ? err.message : 'Failed to enable motors' });
+      }
+    },
+
+    disableMotors: async () => {
+      try {
+        await service.disableMotors();
+        set({ error: null });
+      } catch (err) {
+        set({ error: err instanceof Error ? err.message : 'Failed to disable motors' });
+      }
+    },
+
+    moveTo: async (x: number, y: number, feedRate?: number) => {
+      try {
+        await service.moveTo(x, y, feedRate);
+        set({ error: null });
+      } catch (err) {
+        set({ error: err instanceof Error ? err.message : 'Failed to move' });
+      }
+    },
+
+    emergencyStop: async () => {
+      try {
+        await service.emergencyStop();
+        set({
+          plotProgress: null,
+          isPlotting: false,
+          error: null,
+        });
+      } catch (err) {
+        set({ error: err instanceof Error ? err.message : 'Failed to stop' });
+      }
+    },
+
+    startPlot: async (commands: PlotCommand[], side: string = 'front') => {
+      set({ error: null, isPlotting: true });
+      try {
+        const result = await service.startPlot(commands, side);
+        set({ isPlotting: false });
+        return result;
+      } catch (err) {
+        set({
+          error: err instanceof Error ? err.message : 'Plot failed',
+          isPlotting: false,
+        });
+        return false;
+      }
+    },
+
+    pausePlot: () => {
+      service.pausePlot();
+    },
+
+    resumePlot: () => {
+      service.resumePlot();
+    },
+
+    cancelPlot: () => {
+      service.cancelPlot();
+      set({ plotProgress: null, isPlotting: false });
+    },
+
+    clearError: () => {
+      set({ error: null });
+    },
+
+    setCanvasSize: (widthMm: number, heightMm: number) => {
+      service.setCanvasSize(widthMm, heightMm);
+    },
+  };
+});
+
+// Initialize the store on first import
+// This sets up the event handlers
+// DISABLED: This was causing the app to freeze on launch
+// The initialize() will be called manually when needed
+// if (typeof window !== 'undefined') {
+//   // Only run in browser environment
+//   setTimeout(() => {
+//     usePlotterStore.getState().initialize();
+//   }, 0);
+// }

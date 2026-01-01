@@ -38,7 +38,7 @@ export function debounce<T extends (...args: any[]) => any>(
   func: T,
   wait: number
 ): (...args: Parameters<T>) => void {
-  let timeout: NodeJS.Timeout | null = null;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
 
   return function executedFunction(...args: Parameters<T>) {
     const later = () => {
@@ -207,7 +207,7 @@ export function updatePattern(
  */
 export class PatternUpdateManager {
   private pendingUpdates: Map<FabricObject, PatternUpdateOptions> = new Map();
-  private debounceTimer: NodeJS.Timeout | null = null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private canvas: Canvas;
   private currentProject: ProjectDimensions;
   private onComplete?: (obj: FabricObject) => void;

@@ -1,6 +1,8 @@
-import { useState } from 'react';
-import { X, Sparkles, Loader2 } from 'lucide-react';
-import { geminiApi } from '../../services/api';
+import { useState, useRef, useCallback } from 'react';
+import { X, Sparkles, Loader2, Upload, ImageIcon, Wand2, Check, ChevronDown, RotateCcw, Bookmark } from 'lucide-react';
+import { processImageForPlotter } from '../../lib/gemini/geminiClient';
+import { preprocessImage } from '../../lib/imageProcessing';
+import { useImageGalleryStore } from '../../stores/imageGalleryStore';
 
 interface Props {
   open: boolean;
@@ -10,10 +12,22 @@ interface Props {
 }
 
 const STYLE_OPTIONS = [
-  { value: 'line_art', label: 'Line Art', description: 'Clean outlines, bold lines' },
-  { value: 'sketch', label: 'Sketch', description: 'Varied line weights, artistic' },
-  { value: 'minimal', label: 'Minimal', description: 'Simple shapes, essential lines' },
-  { value: 'detailed', label: 'Detailed', description: 'Cross-hatching, intricate shading' },
+  // Classic styles
+  { value: 'line_art', label: 'Line Art', description: 'Clean outlines, bold lines', icon: '✏️' },
+  { value: 'sketch', label: 'Sketch', description: 'Varied line weights, artistic', icon: '🎨' },
+  { value: 'minimal', label: 'Minimal', description: 'Simple shapes, essential lines', icon: '◯' },
+  { value: 'detailed', label: 'Detailed', description: 'Cross-hatching, intricate shading', icon: '🖋️' },
+  // Advanced styles
+  { value: 'continuous', label: 'Continuous Line', description: 'Single line, never lifts', icon: '〰️' },
+  { value: 'geometric', label: 'Geometric', description: 'Triangles, circles, polygons', icon: '△' },
+  { value: 'spiral', label: 'Spiral', description: 'Vinyl record spiral effect', icon: '🌀' },
+  { value: 'stippling', label: 'Stippling', description: 'Dots and pointillism', icon: '∴' },
+  { value: 'hatching', label: 'Hatching', description: 'Parallel lines, engraving style', icon: '▤' },
+  { value: 'contour', label: 'Contour', description: 'Topographic elevation lines', icon: '◠' },
+  { value: 'ascii', label: 'ASCII Art', description: 'Text characters as pixels', icon: '#' },
+  { value: 'cubist', label: 'Cubist', description: 'Fragmented, Picasso-style', icon: '◇' },
+  { value: 'wireframe', label: 'Wireframe', description: '3D mesh, retro graphics', icon: '⬡' },
+  { value: 'circuit', label: 'Circuit Board', description: 'Electronic, technical lines', icon: '⏚' },
 ];
 
 export default function ImageProcessDialog({ open, onClose, imageDataUrl, onAddToCanvas }: Props) {
@@ -26,6 +40,23 @@ export default function ImageProcessDialog({ open, onClose, imageDataUrl, onAddT
   const [removeBackground, setRemoveBackground] = useState(true);
   const [threshold, setThreshold] = useState(250);
   const [padding, setPadding] = useState(10);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const { addImage } = useImageGalleryStore();
+
+  // Handle keyboard shortcuts
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      onClose();
+    } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      if (processedImage) {
+        handleAddProcessed();
+      } else if (!processing) {
+        handleProcess();
+      }
+    }
+  }, [processedImage, processing]);
 
   if (!open) return null;
 
@@ -39,24 +70,21 @@ export default function ImageProcessDialog({ open, onClose, imageDataUrl, onAddT
     setError(null);
 
     try {
-      // Convert data URL to base64
-      const base64 = imageDataUrl.split(',')[1];
-
-      // Call Gemini API to process the image
-      const result = await geminiApi.processImage(
-        base64,
-        useCustomPrompt ? undefined : style,
-        useCustomPrompt ? customPrompt : undefined,
+      // Step 1: Preprocess image (background removal, cropping)
+      const preprocessedDataUrl = await preprocessImage(imageDataUrl, {
         removeBackground,
         threshold,
-        padding
-      );
+        padding,
+      });
 
-      // Convert response to data URL
-      // Add timestamp to ensure React sees this as a new value even if base64 is somehow cached
-      const timestamp = Date.now();
+      // Step 2: Convert to line art using Gemini
+      const base64 = preprocessedDataUrl.split(',')[1];
+      const result = await processImageForPlotter(
+        base64,
+        useCustomPrompt ? undefined : style,
+        useCustomPrompt ? customPrompt : undefined
+      );
       const processedDataUrl = `data:image/png;base64,${result.image_base64}`;
-      console.log(`[ImageProcessDialog] Received processed image at ${timestamp}, length: ${result.image_base64.length}`);
       setProcessedImage(processedDataUrl);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to process image';
@@ -78,268 +106,276 @@ export default function ImageProcessDialog({ open, onClose, imageDataUrl, onAddT
     setError(null);
   };
 
+  const handleSaveToGallery = async () => {
+    if (!processedImage) return;
+
+    setIsSaving(true);
+    try {
+      // Determine source: 'processed' if Gemini was used, 'upload' otherwise
+      const source = useCustomPrompt || style ? 'processed' : 'upload';
+
+      await addImage(processedImage, source, {
+        style: !useCustomPrompt ? style : undefined,
+        originalFilename: undefined, // We don't have the filename here
+      });
+
+      console.log('Image saved to gallery successfully');
+    } catch (err) {
+      console.error('Failed to save to gallery:', err);
+      setError('Failed to save image to gallery');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
-    <div className="dialog-overlay" onClick={onClose}>
-      <div className="dialog" style={{ maxWidth: 800 }} onClick={(e) => e.stopPropagation()}>
-        <div className="dialog-header flex justify-between items-center">
-          <h2 className="dialog-title">Add Image to Canvas</h2>
-          <button className="btn btn-icon" onClick={onClose}>
-            <X size={20} />
+    <div className="linear-dialog-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
+      <div
+        ref={dialogRef}
+        className="linear-dialog linear-dialog-lg"
+        onClick={(e) => e.stopPropagation()}
+        tabIndex={-1}
+      >
+        {/* Header */}
+        <div className="linear-dialog-header">
+          <div className="linear-dialog-header-content">
+            <div className="linear-dialog-icon">
+              <ImageIcon size={18} />
+            </div>
+            <div>
+              <h2 className="linear-dialog-title">Add Image</h2>
+              <p className="linear-dialog-subtitle">Add to canvas or convert to line art for plotting</p>
+            </div>
+          </div>
+          <button className="linear-close-btn" onClick={onClose}>
+            <X size={18} />
           </button>
         </div>
 
-        <div className="dialog-content">
-          <div
-            style={{
-              padding: 12,
-              background: 'rgba(59, 130, 246, 0.1)',
-              borderRadius: 'var(--radius)',
-              marginBottom: 16,
-              color: 'var(--color-text-secondary)',
-              fontSize: '0.875rem',
-            }}
-          >
-            Raw raster images are difficult to plot. You can add the image as-is (free), or optionally
-            use AI to convert to line art suitable for pen plotting (requires Gemini API credits).
+        {/* Content */}
+        <div className="linear-dialog-content">
+          {/* Info Banner */}
+          <div className="linear-info-banner">
+            <Sparkles size={16} className="linear-info-icon" />
+            <span>Raster images work best when converted to line art for pen plotting</span>
           </div>
 
-          <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
-            {/* Original Image Preview */}
-            <div style={{ flex: 1 }}>
-              <label className="form-label">Original Image</label>
-              <div
-                style={{
-                  width: '100%',
-                  height: 200,
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius)',
-                  overflow: 'hidden',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  background: 'white',
-                }}
-              >
-                <img
-                  src={imageDataUrl}
-                  alt="Original"
-                  style={{
-                    maxWidth: '100%',
-                    maxHeight: '100%',
-                    objectFit: 'contain',
-                  }}
-                />
+          {/* Image Comparison */}
+          <div className="linear-image-compare">
+            {/* Original */}
+            <div className="linear-image-panel">
+              <div className="linear-image-label">
+                <span className="linear-label-dot original"></span>
+                Original
+              </div>
+              <div className="linear-image-preview">
+                <img src={imageDataUrl} alt="Original" />
               </div>
             </div>
 
-            {/* Processed Image Preview */}
-            <div style={{ flex: 1 }}>
-              <label className="form-label">Processed Image</label>
-              <div
-                style={{
-                  width: '100%',
-                  height: 200,
-                  border: '1px solid var(--color-border)',
-                  borderRadius: 'var(--radius)',
-                  overflow: 'hidden',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  background: 'white',
-                }}
-              >
+            {/* Arrow */}
+            <div className="linear-compare-arrow">
+              <Wand2 size={20} />
+            </div>
+
+            {/* Processed */}
+            <div className="linear-image-panel">
+              <div className="linear-image-label">
+                <span className="linear-label-dot processed"></span>
+                Processed
+              </div>
+              <div className="linear-image-preview">
                 {processing ? (
-                  <div style={{ textAlign: 'center' }}>
-                    <Loader2 size={32} className="animate-spin" style={{ margin: '0 auto 8px' }} />
-                    <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
-                      Processing...
-                    </p>
+                  <div className="linear-loading-state">
+                    <Loader2 size={24} className="animate-spin" />
+                    <span>Converting to line art...</span>
                   </div>
                 ) : processedImage ? (
-                  <img
-                    key={processedImage}
-                    src={processedImage}
-                    alt="Processed"
-                    style={{
-                      maxWidth: '100%',
-                      maxHeight: '100%',
-                      objectFit: 'contain',
-                    }}
-                  />
+                  <img key={processedImage} src={processedImage} alt="Processed" />
                 ) : (
-                  <p style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)' }}>
-                    Click "Process with AI" to convert
-                  </p>
+                  <div className="linear-empty-state">
+                    <div className="linear-empty-icon">
+                      <Wand2 size={24} />
+                    </div>
+                    <span>Click "Convert" to process</span>
+                  </div>
                 )}
               </div>
             </div>
           </div>
 
+          {/* Options - Only show when not processed */}
           {!processedImage && (
-            <>
-              {/* Background Removal Options */}
-              <div className="form-group">
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={removeBackground}
-                    onChange={(e) => setRemoveBackground(e.target.checked)}
-                    style={{ width: 16, height: 16 }}
-                  />
-                  Remove Background & Auto-Crop
-                </label>
-                <p
-                  style={{
-                    fontSize: '0.75rem',
-                    color: 'var(--color-text-secondary)',
-                    marginTop: 4,
-                    marginBottom: 8,
-                  }}
-                >
-                  Automatically remove white background and crop to content after AI processing
-                </p>
-
-                {removeBackground && (
-                  <div style={{ marginLeft: 24, marginTop: 8 }}>
-                    <div style={{ marginBottom: 8 }}>
-                      <label className="form-label" style={{ fontSize: '0.875rem' }}>
-                        Threshold: {threshold} (higher = more aggressive)
-                      </label>
-                      <input
-                        type="range"
-                        min="200"
-                        max="255"
-                        value={threshold}
-                        onChange={(e) => setThreshold(Number(e.target.value))}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                    <div>
-                      <label className="form-label" style={{ fontSize: '0.875rem' }}>
-                        Padding: {padding}px
-                      </label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="50"
-                        value={padding}
-                        onChange={(e) => setPadding(Number(e.target.value))}
-                        style={{ width: '100%' }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Processing Style</label>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            <div className="linear-options-section">
+              {/* Style Selection */}
+              <div className="linear-form-group">
+                <label className="linear-label">Style</label>
+                <div className="linear-style-grid">
                   {STYLE_OPTIONS.map((option) => (
                     <button
                       key={option.value}
-                      className={`btn ${!useCustomPrompt && style === option.value ? 'btn-primary' : 'btn-secondary'}`}
+                      className={`linear-style-card ${!useCustomPrompt && style === option.value ? 'selected' : ''}`}
                       onClick={() => {
                         setUseCustomPrompt(false);
                         setStyle(option.value);
                       }}
-                      style={{ flex: '1 1 calc(50% - 4px)', minWidth: 140 }}
                     >
-                      <div>
-                        <div>{option.label}</div>
-                        <div style={{ fontSize: '0.7rem', opacity: 0.8 }}>{option.description}</div>
-                      </div>
+                      <span className="linear-style-icon">{option.icon}</span>
+                      <span className="linear-style-name">{option.label}</span>
+                      <span className="linear-style-desc">{option.description}</span>
+                      {!useCustomPrompt && style === option.value && (
+                        <div className="linear-style-check">
+                          <Check size={14} />
+                        </div>
+                      )}
                     </button>
                   ))}
                 </div>
-                <button
-                  className={`btn ${useCustomPrompt ? 'btn-primary' : 'btn-secondary'}`}
-                  onClick={() => setUseCustomPrompt(!useCustomPrompt)}
-                  style={{ width: '100%' }}
-                >
-                  Custom Instructions
-                </button>
               </div>
 
+              {/* Custom Prompt Toggle */}
+              <button
+                className={`linear-custom-toggle ${useCustomPrompt ? 'active' : ''}`}
+                onClick={() => setUseCustomPrompt(!useCustomPrompt)}
+              >
+                <span>Use custom instructions</span>
+                <ChevronDown size={16} className={useCustomPrompt ? 'rotated' : ''} />
+              </button>
+
               {useCustomPrompt && (
-                <div className="form-group">
-                  <label className="form-label">Custom Processing Instructions</label>
+                <div className="linear-form-group">
                   <textarea
-                    className="form-input"
+                    className="linear-textarea"
                     value={customPrompt}
                     onChange={(e) => setCustomPrompt(e.target.value)}
                     placeholder="e.g., Convert to manga-style line art with dramatic shadows"
                     rows={3}
                   />
-                  <p
-                    style={{
-                      fontSize: '0.75rem',
-                      color: 'var(--color-text-secondary)',
-                      marginTop: 4,
-                    }}
-                  >
-                    Describe how you want the image converted for plotting
-                  </p>
                 </div>
               )}
-            </>
+
+              {/* Advanced Options */}
+              <button
+                className={`linear-advanced-toggle ${showAdvanced ? 'active' : ''}`}
+                onClick={() => setShowAdvanced(!showAdvanced)}
+              >
+                <span>Advanced options</span>
+                <ChevronDown size={16} className={showAdvanced ? 'rotated' : ''} />
+              </button>
+
+              {showAdvanced && (
+                <div className="linear-advanced-options">
+                  <label className="linear-checkbox-label">
+                    <input
+                      type="checkbox"
+                      checked={removeBackground}
+                      onChange={(e) => setRemoveBackground(e.target.checked)}
+                    />
+                    <span className="linear-checkbox-text">Remove background & auto-crop</span>
+                  </label>
+
+                  {removeBackground && (
+                    <div className="linear-slider-group">
+                      <div className="linear-slider-row">
+                        <label className="linear-slider-label">
+                          Threshold
+                          <span className="linear-slider-value">{threshold}</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="200"
+                          max="255"
+                          value={threshold}
+                          onChange={(e) => setThreshold(Number(e.target.value))}
+                          className="linear-slider"
+                        />
+                      </div>
+                      <div className="linear-slider-row">
+                        <label className="linear-slider-label">
+                          Padding
+                          <span className="linear-slider-value">{padding}px</span>
+                        </label>
+                        <input
+                          type="range"
+                          min="0"
+                          max="50"
+                          value={padding}
+                          onChange={(e) => setPadding(Number(e.target.value))}
+                          className="linear-slider"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
+          {/* Error State */}
           {error && (
-            <div
-              style={{
-                padding: 12,
-                background: 'rgba(239, 68, 68, 0.1)',
-                borderRadius: 'var(--radius)',
-                marginBottom: 16,
-                color: 'var(--color-error)',
-                fontSize: '0.875rem',
-              }}
-            >
-              {error}
+            <div className="linear-error-banner">
+              <span>{error}</span>
+              <button onClick={() => setError(null)} className="linear-error-dismiss">
+                <X size={14} />
+              </button>
             </div>
           )}
         </div>
 
-        <div className="dialog-footer flex justify-end gap-2">
-          <button className="btn btn-secondary" onClick={onClose}>
-            Cancel
-          </button>
-          {!processedImage ? (
-            <>
-              <button className="btn btn-primary" onClick={handleAddRaw}>
-                Add as-is (Free)
-              </button>
-              <button
-                className="btn btn-secondary"
-                onClick={handleProcess}
-                disabled={processing || (useCustomPrompt && !customPrompt.trim())}
-              >
-                {processing ? (
-                  <>
-                    <Loader2 size={16} className="animate-spin" style={{ marginRight: 4 }} />
-                    Processing...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles size={16} style={{ marginRight: 4 }} />
-                    Process with AI (Costs Credits)
-                  </>
-                )}
-              </button>
-            </>
-          ) : (
-            <>
-              <button className="btn btn-secondary" onClick={handleReset}>
-                Try Different Style
-              </button>
-              <button className="btn btn-secondary" onClick={handleAddRaw}>
-                Use Original Instead
-              </button>
-              <button className="btn btn-primary" onClick={handleAddProcessed}>
-                Add Processed Image
-              </button>
-            </>
-          )}
+        {/* Footer */}
+        <div className="linear-dialog-footer">
+          <div className="linear-footer-hint">
+            <kbd>⌘</kbd> + <kbd>Enter</kbd> to confirm
+          </div>
+          <div className="linear-footer-actions">
+            {!processedImage ? (
+              <>
+                <button className="linear-btn linear-btn-ghost" onClick={handleAddRaw}>
+                  <Upload size={16} />
+                  Add Original
+                </button>
+                <button
+                  className="linear-btn linear-btn-primary"
+                  onClick={handleProcess}
+                  disabled={processing || (useCustomPrompt && !customPrompt.trim())}
+                >
+                  {processing ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      Converting...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles size={16} />
+                      Convert to Line Art
+                    </>
+                  )}
+                </button>
+              </>
+            ) : (
+              <>
+                <button className="linear-btn linear-btn-ghost" onClick={handleReset}>
+                  <RotateCcw size={16} />
+                  Try Again
+                </button>
+                <button
+                  className="linear-btn linear-btn-secondary"
+                  onClick={handleSaveToGallery}
+                  disabled={isSaving}
+                >
+                  <Bookmark size={16} />
+                  {isSaving ? 'Saving...' : 'Save to Gallery'}
+                </button>
+                <button className="linear-btn linear-btn-secondary" onClick={handleAddRaw}>
+                  Use Original
+                </button>
+                <button className="linear-btn linear-btn-primary" onClick={handleAddProcessed}>
+                  <Check size={16} />
+                  Add to Canvas
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
