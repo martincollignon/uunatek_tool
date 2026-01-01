@@ -149,26 +149,30 @@ async def process_image(request: ProcessImageRequest):
                     "Recreate this image as a clean line art illustration. "
                     "Use bold, uniform black outlines to define all major shapes and objects. "
                     "Simplify details into clear geometric forms. Use absolutely no shading - "
-                    "just clean outlines like a coloring book page."
+                    "just clean outlines like a coloring book page. "
+                    "The background MUST be completely white #FFFFFF."
                 ),
                 "sketch": (
                     "Recreate this image as a hand-drawn sketch with expressive linework. "
                     "Vary the line weights - thicker lines for emphasis and foreground, thinner lines for details. "
                     "Use loose, gestural strokes that feel organic and artistic. "
-                    "Add minimal shading using only parallel hatching lines where needed for depth."
+                    "Add minimal shading using only parallel hatching lines where needed for depth. "
+                    "The background MUST be completely white #FFFFFF."
                 ),
                 "minimal": (
                     "Recreate this image in an extremely minimal, simplified style. "
                     "Reduce the subject to its absolute essential shapes using the fewest possible lines. "
                     "Think of iconic logos or pictograms - just the core silhouette and key features. "
-                    "No shading, no texture, no unnecessary details. Pure, elegant simplicity."
+                    "No shading, no texture, no unnecessary details. Pure, elegant simplicity. "
+                    "The background MUST be completely white #FFFFFF."
                 ),
                 "detailed": (
                     "Recreate this image as an intricate pen and ink illustration. "
                     "Use extensive cross-hatching and parallel line work to create rich tonal values and textures. "
                     "Show depth through careful line density - closer hatching for darker areas, "
                     "sparser hatching for lighter tones. Think of vintage engraving or etching techniques. "
-                    "Still no solid fills - everything must be achieved through line work only."
+                    "Still no solid fills - everything must be achieved through line work only. "
+                    "The background MUST be completely white #FFFFFF."
                 ),
             }
             prompt = style_prompts.get(request.style, style_prompts["line_art"])
