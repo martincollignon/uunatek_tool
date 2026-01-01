@@ -220,6 +220,31 @@ export function ErrorAlert({ error, onRecoveryAction, onDismiss }: Props) {
                   </li>
                 ))}
               </ol>
+
+              {/* Show debug context if available */}
+              {error.context && Object.keys(error.context).length > 0 && (
+                <details style={{ marginTop: 12 }}>
+                  <summary style={{
+                    fontSize: '0.75rem',
+                    color: 'var(--color-text-secondary)',
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                  }}>
+                    Technical details
+                  </summary>
+                  <pre style={{
+                    marginTop: 8,
+                    padding: 8,
+                    background: 'rgba(0,0,0,0.1)',
+                    borderRadius: '4px',
+                    fontSize: '0.6875rem',
+                    overflow: 'auto',
+                    color: 'var(--color-text-secondary)',
+                  }}>
+                    {JSON.stringify(error.context, null, 2)}
+                  </pre>
+                </details>
+              )}
             </div>
           )}
         </div>

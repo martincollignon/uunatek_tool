@@ -8,21 +8,23 @@ export interface AlignmentGuide {
   dash?: number[];
 }
 
+export interface SnapState {
+  isSnappedHorizontal: boolean;
+  isSnappedVertical: boolean;
+  currentVerticalSnapPos: number | undefined;
+  currentHorizontalSnapPos: number | undefined;
+}
+
 export interface SnapResult {
   snapLeft?: number;
   snapTop?: number;
   guides: AlignmentGuide[];
+  newSnapState: SnapState;
 }
 
 const SNAP_THRESHOLD = 8; // pixels - increased for smoother snapping
 const SNAP_RELEASE_THRESHOLD = 12; // pixels - hysteresis to prevent rapid toggling
 const CENTER_SNAP_WEIGHT = 0.8; // Prioritize center snaps over edge snaps (lower = stronger)
-
-// Track if object is currently snapped and to which guide position
-let isSnappedHorizontal = false;
-let isSnappedVertical = false;
-let currentVerticalSnapPos: number | undefined;
-let currentHorizontalSnapPos: number | undefined;
 
 /**
  * Calculate alignment guides for an object being moved on the canvas
@@ -31,11 +33,15 @@ export function calculateAlignmentGuides(
   canvas: Canvas,
   activeObject: FabricObject,
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  snapState: SnapState
 ): SnapResult {
   const guides: AlignmentGuide[] = [];
   let snapLeft: number | undefined;
   let snapTop: number | undefined;
+
+  // Extract current snap state
+  let { isSnappedHorizontal, isSnappedVertical, currentVerticalSnapPos, currentHorizontalSnapPos } = snapState;
 
   const objectBounds = activeObject.getBoundingRect();
   const objectCenterX = objectBounds.left + objectBounds.width / 2;
@@ -302,7 +308,17 @@ export function calculateAlignmentGuides(
     }
   });
 
-  return { snapLeft, snapTop, guides };
+  return {
+    snapLeft,
+    snapTop,
+    guides,
+    newSnapState: {
+      isSnappedHorizontal,
+      isSnappedVertical,
+      currentVerticalSnapPos,
+      currentHorizontalSnapPos,
+    }
+  };
 }
 
 /**
@@ -356,16 +372,6 @@ export function clearAlignmentGuides(canvas: Canvas) {
   const guides = canvas.getObjects().filter((obj) => (obj as any).name === 'alignmentGuide');
   guides.forEach((guide) => canvas.remove(guide));
   canvas.requestRenderAll();
-}
-
-/**
- * Reset snap state when object is released
- */
-export function resetSnapState() {
-  isSnappedHorizontal = false;
-  isSnappedVertical = false;
-  currentVerticalSnapPos = undefined;
-  currentHorizontalSnapPos = undefined;
 }
 
 /**

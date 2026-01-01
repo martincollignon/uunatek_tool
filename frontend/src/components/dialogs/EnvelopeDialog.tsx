@@ -72,7 +72,7 @@ export function EnvelopeDialog({ onClose, onApply, initialAddress }: Props) {
 
           {/* Recipient */}
           <div style={{ marginBottom: 24 }}>
-            <h4 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 12 }}>Recipient</h4>
+            <h4 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 12, color: 'var(--color-text-primary)' }}>Recipient</h4>
             <div className="form-group">
               <label className="form-label">Name *</label>
               <input
@@ -113,7 +113,7 @@ export function EnvelopeDialog({ onClose, onApply, initialAddress }: Props) {
 
           {/* Sender (optional) */}
           <div>
-            <h4 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 12 }}>
+            <h4 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 12, color: 'var(--color-text-primary)' }}>
               Return Address (Optional)
             </h4>
             <div className="form-group">

@@ -68,7 +68,7 @@ export function PlotterControls() {
 
   return (
     <div className="plotter-controls">
-      <h3 style={{ marginBottom: 16, fontSize: '0.875rem', fontWeight: 600 }}>Plotter Connection</h3>
+      <h3 style={{ marginBottom: 16, fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Plotter Connection</h3>
 
       {!status?.connected ? (
         <div className="connection-controls">
