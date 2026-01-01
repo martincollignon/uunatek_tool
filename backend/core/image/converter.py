@@ -144,6 +144,14 @@ class ImageConverter:
         try:
             # Open image with PIL (supports HEIC via pillow-heif plugin if installed)
             with Image.open(io.BytesIO(image_bytes)) as img:
+                # Apply EXIF orientation if present
+                try:
+                    from PIL import ImageOps
+                    img = ImageOps.exif_transpose(img)
+                    logger.info("Applied EXIF orientation correction")
+                except Exception as e:
+                    logger.debug(f"No EXIF orientation data or failed to apply: {e}")
+
                 # Convert to RGB if necessary (e.g., from RGBA or other modes)
                 if img.mode not in ("RGB", "RGBA", "L"):
                     logger.info(f"Converting image mode from {img.mode} to RGB")
@@ -179,6 +187,14 @@ class ImageConverter:
         """
         try:
             with Image.open(io.BytesIO(image_bytes)) as img:
+                # Apply EXIF orientation if present
+                try:
+                    from PIL import ImageOps
+                    img = ImageOps.exif_transpose(img)
+                    logger.info("Applied EXIF orientation correction")
+                except Exception as e:
+                    logger.debug(f"No EXIF orientation data or failed to apply: {e}")
+
                 # JPEG doesn't support transparency, convert RGBA to RGB
                 if img.mode in ("RGBA", "LA", "P"):
                     logger.info(f"Converting image mode from {img.mode} to RGB for JPEG")
@@ -262,6 +278,14 @@ class ImageConverter:
         """
         try:
             with Image.open(io.BytesIO(image_bytes)) as img:
+                # Apply EXIF orientation if present
+                try:
+                    from PIL import ImageOps
+                    img = ImageOps.exif_transpose(img)
+                    logger.info("Applied EXIF orientation correction")
+                except Exception as e:
+                    logger.debug(f"No EXIF orientation data or failed to apply: {e}")
+
                 # WebP supports both RGB and RGBA
                 if img.mode not in ("RGB", "RGBA"):
                     logger.info(f"Converting image mode from {img.mode} to RGBA")

@@ -461,6 +461,92 @@ PLT_Q003 = _register(ErrorDefinition(
     recovery_actions=[RecoveryAction.USER_FIX, RecoveryAction.ABORT],
 ))
 
+# ============= GRBL-Specific Errors (PLT-G) =============
+# These errors are specific to GRBL/DrawCore firmware used by iDraw 2.0
+
+PLT_G001 = _register(ErrorDefinition(
+    code="PLT-G001",
+    name="GRBL Alarm",
+    message="GRBL controller is in alarm state",
+    detail="The GRBL controller has triggered an alarm. This typically means a limit switch was hit unexpectedly or the machine lost position.",
+    severity=ErrorSeverity.ERROR,
+    category=ErrorCategory.MOTION,
+    remediation_steps=[
+        "The machine has entered an alarm state",
+        "Check if the carriage hit a limit switch unexpectedly",
+        "Ensure nothing is blocking the movement path",
+        "Click 'Home' to clear the alarm and re-establish position",
+        "If alarm persists, power cycle the plotter",
+    ],
+    recovery_actions=[RecoveryAction.HOME, RecoveryAction.RETRY, RecoveryAction.ABORT],
+))
+
+PLT_G002 = _register(ErrorDefinition(
+    code="PLT-G002",
+    name="GRBL Error",
+    message="GRBL returned an error response",
+    detail="The GRBL controller rejected the command with an error code. This may indicate invalid G-code or parameters.",
+    severity=ErrorSeverity.ERROR,
+    category=ErrorCategory.COMMUNICATION,
+    remediation_steps=[
+        "The GRBL controller rejected a command",
+        "This may indicate invalid parameters or unsupported G-code",
+        "Note: iDraw DrawCore does not support G2/G3 arc commands",
+        "Try homing the machine first",
+        "Check if coordinates are within machine limits",
+    ],
+    recovery_actions=[RecoveryAction.HOME, RecoveryAction.RETRY],
+))
+
+PLT_G003 = _register(ErrorDefinition(
+    code="PLT-G003",
+    name="Position Unknown",
+    message="Machine position is unknown - homing required",
+    detail="GRBL does not know the current position. This can happen after power cycle, emergency stop, or alarm state.",
+    severity=ErrorSeverity.WARNING,
+    category=ErrorCategory.MOTION,
+    remediation_steps=[
+        "The machine has lost its position reference",
+        "This can happen after power cycle or emergency stop",
+        "Click 'Home' to establish position reference before plotting",
+        "Do not move the carriage manually after homing",
+    ],
+    recovery_actions=[RecoveryAction.HOME],
+))
+
+PLT_G004 = _register(ErrorDefinition(
+    code="PLT-G004",
+    name="GRBL Hard Limit",
+    message="Hard limit switch triggered",
+    detail="A limit switch was triggered during movement. Position may be lost and re-homing is required.",
+    severity=ErrorSeverity.ERROR,
+    category=ErrorCategory.MOTION,
+    remediation_steps=[
+        "The carriage hit a limit switch during movement",
+        "This usually means the plot exceeded machine boundaries",
+        "Check that the design fits within the plotting area",
+        "Click 'Home' to unlock and re-establish position",
+        "You may need to restart the plot",
+    ],
+    recovery_actions=[RecoveryAction.HOME, RecoveryAction.ABORT],
+))
+
+PLT_G005 = _register(ErrorDefinition(
+    code="PLT-G005",
+    name="GRBL Soft Limit",
+    message="Movement exceeds soft limits",
+    detail="The requested movement would exceed the machine's configured soft limits. The position is retained.",
+    severity=ErrorSeverity.WARNING,
+    category=ErrorCategory.MOTION,
+    remediation_steps=[
+        "The requested movement exceeds machine travel limits",
+        "The current position has been retained (no position loss)",
+        "Check that your design fits within the plotting area",
+        "Scale down your design or reposition it on the canvas",
+    ],
+    recovery_actions=[RecoveryAction.ABORT],
+))
+
 
 class PlotterError(Exception):
     """Exception raised for plotter-related errors.
