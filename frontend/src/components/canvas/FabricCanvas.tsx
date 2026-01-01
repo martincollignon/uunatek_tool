@@ -7,6 +7,9 @@ import {
   drawAlignmentGuides,
   clearAlignmentGuides,
   drawStaticGuides,
+  AnchorMode,
+  HorizontalAnchor,
+  VerticalAnchor,
 } from '../../utils/alignmentGuides';
 import {
   applyCanvasOptimizations,
@@ -62,6 +65,7 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
   } = useAlignmentGuidesStore();
   const isPanningRef = useRef(false);
   const lastPosRef = useRef({ x: 0, y: 0 });
+  const dragAnchorModeRef = useRef<AnchorMode | undefined>(undefined);
   const [rotationAngle, setRotationAngle] = useState<number | null>(null);
   const [rotationPosition, setRotationPosition] = useState<{ x: number; y: number } | null>(null);
 
@@ -111,6 +115,25 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     setSnapState,
     resetSnapState,
   ]);
+
+  /**
+   * Calculate which anchor region was clicked based on pointer position
+   */
+  const calculateAnchorMode = useCallback((
+    pointer: Point,
+    objectBounds: { left: number; top: number; width: number; height: number }
+  ): AnchorMode => {
+    const relativeX = (pointer.x - objectBounds.left) / objectBounds.width;
+    const relativeY = (pointer.y - objectBounds.top) / objectBounds.height;
+
+    const horizontal: HorizontalAnchor =
+      relativeX < 0.33 ? 'left' : relativeX > 0.67 ? 'right' : 'center';
+
+    const vertical: VerticalAnchor =
+      relativeY < 0.33 ? 'top' : relativeY > 0.67 ? 'bottom' : 'center';
+
+    return { horizontal, vertical };
+  }, []);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -264,6 +287,17 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     let lastSnapLeft: number | undefined;
     let lastSnapTop: number | undefined;
 
+    // Capture anchor mode when drag starts
+    canvas.on('mouse:down:before', (opt) => {
+      const target = opt.target;
+      if (!target || !opt.pointer) return;
+
+      // Calculate which anchor region was clicked
+      const objectBounds = target.getBoundingRect();
+      const anchorMode = calculateAnchorMode(opt.pointer, objectBounds);
+      dragAnchorModeRef.current = anchorMode;
+    });
+
     // Handle object moving for alignment guides
     canvas.on('object:moving', (e) => {
       const target = e.target;
@@ -280,7 +314,7 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
           isSnappedVertical,
           currentVerticalSnapPos,
           currentHorizontalSnapPos,
-        });
+        }, dragAnchorModeRef.current);
 
         // Update snap state in store
         setSnapState(result.newSnapState);
@@ -323,6 +357,7 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       propsRef.current.resetSnapState(); // Reset snap state for next drag
       lastSnapLeft = undefined; // Reset tracking
       lastSnapTop = undefined;
+      dragAnchorModeRef.current = undefined; // Clear anchor mode
       setDirty(true);
       setRotationAngle(null);
       setRotationPosition(null);
@@ -446,7 +481,7 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       canvas.dispose();
       fabricRef.current = null;
     };
-  }, [width, height, onCanvasReady, onSelectionChange, setDirty]);
+  }, [width, height, onCanvasReady, onSelectionChange, setDirty, calculateAnchorMode]);
 
   // Centralized boundary management - single source of truth
   const ensureBoundary = useCallback((canvas: Canvas) => {

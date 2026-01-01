@@ -34,6 +34,14 @@ export function PlotterControls() {
     }
   }, [availablePorts, selectedPort]);
 
+  // Auto-connect to first available device
+  useEffect(() => {
+    if (availablePorts.length > 0 && !status?.connected && !isConnecting && selectedPort) {
+      // Automatically connect to the selected port
+      connect(selectedPort);
+    }
+  }, [availablePorts, status?.connected, isConnecting, selectedPort, connect]);
+
   // Automatic hardware polling when disconnected
   useEffect(() => {
     // Only poll when disconnected
