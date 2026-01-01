@@ -108,7 +108,20 @@ class EBBCommands:
             dy_steps: Y displacement in steps
             duration_ms: Movement duration in milliseconds
         """
-        await self.conn.send_command(f"SM,{duration_ms},{dy_steps},{dx_steps}")
+        # Validate parameters
+        if duration_ms < 1:
+            logger.warning(f"Invalid duration: {duration_ms}ms, clamping to 1ms")
+            duration_ms = 1
+        if duration_ms > 16777215:  # EBB max duration (24-bit)
+            logger.warning(f"Duration {duration_ms}ms exceeds max, clamping to 16777215ms")
+            duration_ms = 16777215
+        if abs(dx_steps) > 16777215 or abs(dy_steps) > 16777215:
+            logger.error(f"Step count out of range: dx={dx_steps}, dy={dy_steps}")
+            raise PlotterError("PLT-M003", context={"dx_steps": dx_steps, "dy_steps": dy_steps})
+
+        command = f"SM,{duration_ms},{dy_steps},{dx_steps}"
+        logger.info(f"Sending move command: {command}")
+        await self.conn.send_command(command)
 
     async def query_motors(self) -> dict:
         """Query motor status."""

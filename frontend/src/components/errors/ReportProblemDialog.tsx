@@ -109,7 +109,7 @@ export function ReportProblemDialog({ onClose, onReportProblem }: Props) {
               >
                 <Icon size={24} style={{ color: 'var(--color-primary)' }} />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 500, marginBottom: 2 }}>{cat.label}</div>
+                  <div style={{ fontWeight: 500, marginBottom: 2, color: 'var(--color-text-primary)' }}>{cat.label}</div>
                   <div style={{ fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
                     {cat.description}
                   </div>
@@ -141,7 +141,7 @@ export function ReportProblemDialog({ onClose, onReportProblem }: Props) {
           >
             <ChevronRight size={20} style={{ transform: 'rotate(180deg)' }} />
           </button>
-          <span style={{ fontWeight: 500 }}>
+          <span style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>
             {selectedCategory && CATEGORY_LABELS[selectedCategory]}
           </span>
         </div>
@@ -179,7 +179,7 @@ export function ReportProblemDialog({ onClose, onReportProblem }: Props) {
                   e.currentTarget.style.borderColor = 'var(--color-border)';
                 }}
               >
-                <AlertTriangle size={18} style={{ color: '#eab308', marginTop: 2 }} />
+                <AlertTriangle size={18} style={{ color: 'var(--color-warning)', marginTop: 2 }} />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 500, fontSize: '0.875rem', marginBottom: 2 }}>
                     {error.name}

@@ -2,12 +2,45 @@ import axios from 'axios';
 import type { Project, ProjectCreate, PlotterStatus, PlotProgress, SerialPort } from '../types';
 import type { PlotterError, RecoveryAction, ErrorCategory } from '../types/errors';
 
+// Extend Window interface to include electron API
+declare global {
+  interface Window {
+    electron?: {
+      getBackendPort: () => Promise<number>;
+    };
+  }
+}
+
 // In development with Vite dev server, use proxy. In Electron or production, connect directly to backend.
 const isDevelopment = import.meta.env.DEV;
 const isViteDevServer = isDevelopment && window.location.port === '5173';
 
+// Get backend URL - will be updated dynamically in Electron
+let backendBaseURL = isViteDevServer ? '/api' : 'http://localhost:8000/api';
+
 const api = axios.create({
-  baseURL: isViteDevServer ? '/api' : 'http://localhost:8000/api',
+  baseURL: backendBaseURL,
+});
+
+// Promise to track backend initialization
+let backendInitialized: Promise<void> = Promise.resolve();
+
+// If running in Electron, get the actual backend port
+if (window.electron?.getBackendPort) {
+  backendInitialized = window.electron.getBackendPort().then((port) => {
+    const newBaseURL = `http://localhost:${port}/api`;
+    console.log(`Using dynamic backend URL: ${newBaseURL}`);
+    api.defaults.baseURL = newBaseURL;
+    backendBaseURL = newBaseURL;
+  }).catch((err) => {
+    console.error('Failed to get backend port from Electron:', err);
+  });
+}
+
+// Add request interceptor to wait for backend initialization
+api.interceptors.request.use(async (config) => {
+  await backendInitialized;
+  return config;
 });
 
 // Projects
@@ -31,7 +64,7 @@ export const canvasApi = {
     return api.post(`/canvas/${projectId}/upload`, formData).then((r) => r.data);
   },
   exportSvg: (projectId: string, side: string = 'front') =>
-    api.get(`/canvas/${projectId}/export/svg`, { params: { side }, responseType: 'text' }).then((r) => r.data),
+    api.get<{ svg: string; warnings: string[] }>(`/canvas/${projectId}/export/svg`, { params: { side } }).then((r) => r.data),
 };
 
 // Plotter

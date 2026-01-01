@@ -8,13 +8,23 @@ export interface AlignmentGuide {
   dash?: number[];
 }
 
+export interface SnapState {
+  isSnappedHorizontal: boolean;
+  isSnappedVertical: boolean;
+  currentVerticalSnapPos: number | undefined;
+  currentHorizontalSnapPos: number | undefined;
+}
+
 export interface SnapResult {
   snapLeft?: number;
   snapTop?: number;
   guides: AlignmentGuide[];
+  newSnapState: SnapState;
 }
 
 const SNAP_THRESHOLD = 8; // pixels - increased for smoother snapping
+const SNAP_RELEASE_THRESHOLD = 12; // pixels - hysteresis to prevent rapid toggling
+const CENTER_SNAP_WEIGHT = 0.8; // Prioritize center snaps over edge snaps (lower = stronger)
 
 /**
  * Calculate alignment guides for an object being moved on the canvas
@@ -23,11 +33,15 @@ export function calculateAlignmentGuides(
   canvas: Canvas,
   activeObject: FabricObject,
   canvasWidth: number,
-  canvasHeight: number
+  canvasHeight: number,
+  snapState: SnapState
 ): SnapResult {
   const guides: AlignmentGuide[] = [];
   let snapLeft: number | undefined;
   let snapTop: number | undefined;
+
+  // Extract current snap state
+  let { isSnappedHorizontal, isSnappedVertical, currentVerticalSnapPos, currentHorizontalSnapPos } = snapState;
 
   const objectBounds = activeObject.getBoundingRect();
   const objectCenterX = objectBounds.left + objectBounds.width / 2;
@@ -58,13 +72,23 @@ export function calculateAlignmentGuides(
     { pos: canvasWidth, label: 'Right Edge' },
   ];
 
+  // Use hysteresis: if already snapped, require larger distance to unsnap
+  const verticalThreshold = isSnappedVertical ? SNAP_RELEASE_THRESHOLD : SNAP_THRESHOLD;
+
   for (const check of verticalChecks) {
-    // Check object center
+    // If we're snapped to a specific guide, only check that guide with the release threshold
+    // This prevents competing with other nearby guides
+    if (isSnappedVertical && currentVerticalSnapPos !== undefined && currentVerticalSnapPos !== check.pos) {
+      continue; // Skip other guides when already snapped to a specific one
+    }
+
+    // Check object center - prioritize center snaps with weighting
     const centerDist = Math.abs(objectCenterX - check.pos);
-    if (centerDist < SNAP_THRESHOLD) {
-      if (!closestVerticalSnap || centerDist < closestVerticalSnap.distance) {
+    const adjustedCenterDist = centerDist * CENTER_SNAP_WEIGHT;
+    if (centerDist < verticalThreshold) {
+      if (!closestVerticalSnap || adjustedCenterDist < closestVerticalSnap.distance) {
         closestVerticalSnap = {
-          distance: centerDist,
+          distance: adjustedCenterDist,
           left: check.pos - objectBounds.width / 2,
           guidePos: check.pos,
           label: check.label,
@@ -74,7 +98,7 @@ export function calculateAlignmentGuides(
 
     // Check object left edge
     const leftDist = Math.abs(objectLeft - check.pos);
-    if (leftDist < SNAP_THRESHOLD) {
+    if (leftDist < verticalThreshold) {
       if (!closestVerticalSnap || leftDist < closestVerticalSnap.distance) {
         closestVerticalSnap = {
           distance: leftDist,
@@ -87,7 +111,7 @@ export function calculateAlignmentGuides(
 
     // Check object right edge
     const rightDist = Math.abs(objectRight - check.pos);
-    if (rightDist < SNAP_THRESHOLD) {
+    if (rightDist < verticalThreshold) {
       if (!closestVerticalSnap || rightDist < closestVerticalSnap.distance) {
         closestVerticalSnap = {
           distance: rightDist,
@@ -102,12 +126,17 @@ export function calculateAlignmentGuides(
   // Apply closest vertical snap
   if (closestVerticalSnap) {
     snapLeft = closestVerticalSnap.left;
+    isSnappedVertical = true;
+    currentVerticalSnapPos = closestVerticalSnap.guidePos; // Remember which guide we're snapped to
     guides.push({
       type: 'vertical',
       position: closestVerticalSnap.guidePos,
       label: closestVerticalSnap.label,
       color: '#FF1744',
     });
+  } else {
+    isSnappedVertical = false;
+    currentVerticalSnapPos = undefined; // Clear when not snapped
   }
 
   // Horizontal alignment checks (for vertical movement)
@@ -119,13 +148,23 @@ export function calculateAlignmentGuides(
     { pos: canvasHeight, label: 'Bottom Edge' },
   ];
 
+  // Use hysteresis: if already snapped, require larger distance to unsnap
+  const horizontalThreshold = isSnappedHorizontal ? SNAP_RELEASE_THRESHOLD : SNAP_THRESHOLD;
+
   for (const check of horizontalChecks) {
-    // Check object center
+    // If we're snapped to a specific guide, only check that guide with the release threshold
+    // This prevents competing with other nearby guides
+    if (isSnappedHorizontal && currentHorizontalSnapPos !== undefined && currentHorizontalSnapPos !== check.pos) {
+      continue; // Skip other guides when already snapped to a specific one
+    }
+
+    // Check object center - prioritize center snaps with weighting
     const centerDist = Math.abs(objectCenterY - check.pos);
-    if (centerDist < SNAP_THRESHOLD) {
-      if (!closestHorizontalSnap || centerDist < closestHorizontalSnap.distance) {
+    const adjustedCenterDist = centerDist * CENTER_SNAP_WEIGHT;
+    if (centerDist < horizontalThreshold) {
+      if (!closestHorizontalSnap || adjustedCenterDist < closestHorizontalSnap.distance) {
         closestHorizontalSnap = {
-          distance: centerDist,
+          distance: adjustedCenterDist,
           top: check.pos - objectBounds.height / 2,
           guidePos: check.pos,
           label: check.label,
@@ -135,7 +174,7 @@ export function calculateAlignmentGuides(
 
     // Check object top edge
     const topDist = Math.abs(objectTop - check.pos);
-    if (topDist < SNAP_THRESHOLD) {
+    if (topDist < horizontalThreshold) {
       if (!closestHorizontalSnap || topDist < closestHorizontalSnap.distance) {
         closestHorizontalSnap = {
           distance: topDist,
@@ -148,7 +187,7 @@ export function calculateAlignmentGuides(
 
     // Check object bottom edge
     const bottomDist = Math.abs(objectBottom - check.pos);
-    if (bottomDist < SNAP_THRESHOLD) {
+    if (bottomDist < horizontalThreshold) {
       if (!closestHorizontalSnap || bottomDist < closestHorizontalSnap.distance) {
         closestHorizontalSnap = {
           distance: bottomDist,
@@ -163,12 +202,17 @@ export function calculateAlignmentGuides(
   // Apply closest horizontal snap
   if (closestHorizontalSnap) {
     snapTop = closestHorizontalSnap.top;
+    isSnappedHorizontal = true;
+    currentHorizontalSnapPos = closestHorizontalSnap.guidePos; // Remember which guide we're snapped to
     guides.push({
       type: 'horizontal',
       position: closestHorizontalSnap.guidePos,
       label: closestHorizontalSnap.label,
       color: '#FF1744',
     });
+  } else {
+    isSnappedHorizontal = false;
+    currentHorizontalSnapPos = undefined; // Clear when not snapped
   }
 
   // Check alignment with other objects (only if no canvas alignment found)
@@ -264,7 +308,17 @@ export function calculateAlignmentGuides(
     }
   });
 
-  return { snapLeft, snapTop, guides };
+  return {
+    snapLeft,
+    snapTop,
+    guides,
+    newSnapState: {
+      isSnappedHorizontal,
+      isSnappedVertical,
+      currentVerticalSnapPos,
+      currentHorizontalSnapPos,
+    }
+  };
 }
 
 /**

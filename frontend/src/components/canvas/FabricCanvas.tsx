@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { Canvas, FabricObject, IText, Point, Rect } from 'fabric';
 import { useCanvasStore } from '../../stores/canvasStore';
 import { useAlignmentGuidesStore } from '../../stores/alignmentGuidesStore';
@@ -8,6 +8,13 @@ import {
   clearAlignmentGuides,
   drawStaticGuides,
 } from '../../utils/alignmentGuides';
+import {
+  applyCanvasOptimizations,
+  makeNonInteractive,
+  optimizeForZoomPan,
+  restoreAfterZoomPan,
+  batchRemoveObjects,
+} from '../../utils/fabricOptimizations';
 import type { CanvasSide } from '../../types';
 
 export interface ZoomControls {
@@ -26,12 +33,16 @@ interface Props {
   onSelectionChange: (object: FabricObject | null) => void;
   onZoomChange?: (zoom: number) => void;
   onZoomControlsReady?: (controls: ZoomControls) => void;
+  onViewportChange?: (offset: { x: number; y: number }) => void;
 }
 
 // Scale factor: pixels per mm for display
 const SCALE = 3;
 
-export function FabricCanvas({ width, height, projectId, side, onCanvasReady, onSelectionChange, onZoomChange, onZoomControlsReady }: Props) {
+// Safety margin in mm - matches backend config.safety_margin_mm
+const SAFETY_MARGIN_MM = 3;
+
+export function FabricCanvas({ width, height, projectId, side, onCanvasReady, onSelectionChange, onZoomChange, onZoomControlsReady, onViewportChange }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fabricRef = useRef<Canvas | null>(null);
   const { loadCanvas, setDirty, isRotated } = useCanvasStore();
@@ -42,11 +53,64 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     showThirds,
     showHalves,
     snapToGuides,
+    isSnappedHorizontal,
+    isSnappedVertical,
+    currentVerticalSnapPos,
+    currentHorizontalSnapPos,
+    setSnapState,
+    resetSnapState,
   } = useAlignmentGuidesStore();
   const isPanningRef = useRef(false);
   const lastPosRef = useRef({ x: 0, y: 0 });
   const [rotationAngle, setRotationAngle] = useState<number | null>(null);
   const [rotationPosition, setRotationPosition] = useState<{ x: number; y: number } | null>(null);
+
+  // Refs to avoid stale closures in event handlers
+  const propsRef = useRef({
+    showSmartGuides,
+    snapToGuides,
+    width,
+    height,
+    onZoomChange,
+    onViewportChange,
+    isSnappedHorizontal,
+    isSnappedVertical,
+    currentVerticalSnapPos,
+    currentHorizontalSnapPos,
+    setSnapState,
+    resetSnapState,
+  });
+
+  // Update refs whenever values change
+  useEffect(() => {
+    propsRef.current = {
+      showSmartGuides,
+      snapToGuides,
+      width,
+      height,
+      onZoomChange,
+      onViewportChange,
+      isSnappedHorizontal,
+      isSnappedVertical,
+      currentVerticalSnapPos,
+      currentHorizontalSnapPos,
+      setSnapState,
+      resetSnapState,
+    };
+  }, [
+    showSmartGuides,
+    snapToGuides,
+    width,
+    height,
+    onZoomChange,
+    onViewportChange,
+    isSnappedHorizontal,
+    isSnappedVertical,
+    currentVerticalSnapPos,
+    currentHorizontalSnapPos,
+    setSnapState,
+    resetSnapState,
+  ]);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -60,7 +124,10 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       selection: true,
     });
 
-    // Add canvas boundary rectangle
+    // Apply performance optimizations
+    applyCanvasOptimizations(canvas);
+
+    // Add canvas boundary rectangle (outer - full paper size)
     const boundary = new Rect({
       left: 0,
       top: 0,
@@ -69,40 +136,99 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       fill: 'transparent',
       stroke: '#3b82f6',
       strokeWidth: 2,
-      selectable: false,
-      evented: false,
-      excludeFromExport: true,
+      excludeFromExport: true,  // Exclude from canvas JSON - this is a UI-only element
       name: 'canvas-boundary',
     });
+
+    // Make boundary non-interactive for performance
+    makeNonInteractive(boundary);
+
     canvas.add(boundary);
     canvas.sendObjectToBack(boundary);
+
+    // Add safety boundary rectangle (inner - safe drawing area)
+    // This shows where content will be clipped to prevent pen catching paper edge
+    const safetyBoundary = new Rect({
+      left: SAFETY_MARGIN_MM * SCALE,
+      top: SAFETY_MARGIN_MM * SCALE,
+      width: (width - 2 * SAFETY_MARGIN_MM) * SCALE,
+      height: (height - 2 * SAFETY_MARGIN_MM) * SCALE,
+      fill: 'transparent',
+      stroke: '#f97316',  // Orange color to differentiate from outer boundary
+      strokeWidth: 1,
+      strokeDashArray: [8, 4],  // Dashed line
+      excludeFromExport: true,  // Exclude from canvas JSON - this is a UI-only element
+      name: 'safety-boundary',
+    });
+
+    // Make safety boundary non-interactive for performance
+    makeNonInteractive(safetyBoundary);
+
+    canvas.add(safetyBoundary);
+    canvas.sendObjectToBack(safetyBoundary);
 
     fabricRef.current = canvas;
     onCanvasReady(canvas);
 
+    // Helper to notify viewport changes
+    const notifyViewportChange = () => {
+      const { onViewportChange } = propsRef.current;
+      if (onViewportChange) {
+        const vpt = canvas.viewportTransform;
+        if (vpt) {
+          onViewportChange({ x: vpt[4], y: vpt[5] });
+        }
+      }
+    };
+
+    // Helper to get current zoom from viewport transform
+    const getCurrentZoom = () => {
+      const vpt = canvas.viewportTransform;
+      if (!vpt) return 1;
+      // Extract zoom from the transform matrix
+      // For normal: zoom is vpt[0]
+      // For rotated: zoom is vpt[1] (since rotation swaps x and y)
+      return isRotated ? Math.abs(vpt[1]) : Math.abs(vpt[0]);
+    };
+
+    // Helper to apply zoom while preserving rotation
+    const applyZoom = (newZoom: number) => {
+      const canvasHeight = height * SCALE;
+      if (isRotated) {
+        canvas.viewportTransform = [
+          0, newZoom, 0,
+          -newZoom, 0, canvasHeight * newZoom,
+        ];
+      } else {
+        canvas.viewportTransform = [newZoom, 0, 0, newZoom, 0, 0];
+      }
+    };
+
     // Setup zoom controls
     const zoomControls: ZoomControls = {
       zoomIn: () => {
-        let zoom = canvas.getZoom();
+        let zoom = getCurrentZoom();
         zoom = Math.min(zoom * 1.2, 5);
-        canvas.setZoom(zoom);
+        applyZoom(zoom);
         canvas.requestRenderAll();
+        notifyViewportChange();
         if (onZoomChange) onZoomChange(zoom);
       },
       zoomOut: () => {
-        let zoom = canvas.getZoom();
+        let zoom = getCurrentZoom();
         zoom = Math.max(zoom / 1.2, 0.1);
-        canvas.setZoom(zoom);
+        applyZoom(zoom);
         canvas.requestRenderAll();
+        notifyViewportChange();
         if (onZoomChange) onZoomChange(zoom);
       },
       resetZoom: () => {
-        canvas.setZoom(1);
-        canvas.viewportTransform = [1, 0, 0, 1, 0, 0];
+        applyZoom(1);
         canvas.requestRenderAll();
+        notifyViewportChange();
         if (onZoomChange) onZoomChange(1);
       },
-      getZoom: () => canvas.getZoom(),
+      getZoom: () => getCurrentZoom(),
     };
 
     if (onZoomControlsReady) {
@@ -118,7 +244,15 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       onSelectionChange(e.selected?.[0] || null);
     });
 
-    canvas.on('object:added', () => {
+    canvas.on('object:added', (e) => {
+      // Ensure boundary stays at the back when new objects are added
+      const addedObj = e.target;
+      if (addedObj && (addedObj as any).name !== 'canvas-boundary') {
+        const boundary = canvas.getObjects().find((obj) => (obj as any).name === 'canvas-boundary');
+        if (boundary) {
+          canvas.sendObjectToBack(boundary);
+        }
+      }
       setDirty(true);
     });
 
@@ -126,27 +260,56 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       setDirty(true);
     });
 
+    // Track last snap positions to prevent jitter
+    let lastSnapLeft: number | undefined;
+    let lastSnapTop: number | undefined;
+
     // Handle object moving for alignment guides
     canvas.on('object:moving', (e) => {
       const target = e.target;
       if (!target) return;
 
+      const { width, height, showSmartGuides, snapToGuides, isSnappedHorizontal, isSnappedVertical, currentVerticalSnapPos, currentHorizontalSnapPos, setSnapState } = propsRef.current;
       const canvasWidth = width * SCALE;
       const canvasHeight = height * SCALE;
 
       // Only show/calculate guides if smart guides are enabled
       if (showSmartGuides) {
-        const result = calculateAlignmentGuides(canvas, target, canvasWidth, canvasHeight);
+        const result = calculateAlignmentGuides(canvas, target, canvasWidth, canvasHeight, {
+          isSnappedHorizontal,
+          isSnappedVertical,
+          currentVerticalSnapPos,
+          currentHorizontalSnapPos,
+        });
+
+        // Update snap state in store
+        setSnapState(result.newSnapState);
 
         // Apply snapping if enabled
         if (snapToGuides) {
-          if (result.snapLeft !== undefined) {
+          // Only update position if the snap target changed to prevent jitter
+          const snapLeftChanged = result.snapLeft !== lastSnapLeft;
+          const snapTopChanged = result.snapTop !== lastSnapTop;
+
+          if (snapLeftChanged && result.snapLeft !== undefined) {
             target.set('left', result.snapLeft);
+            lastSnapLeft = result.snapLeft;
+          } else if (result.snapLeft === undefined && lastSnapLeft !== undefined) {
+            // Clear last snap when no longer snapping
+            lastSnapLeft = undefined;
           }
-          if (result.snapTop !== undefined) {
+
+          if (snapTopChanged && result.snapTop !== undefined) {
             target.set('top', result.snapTop);
+            lastSnapTop = result.snapTop;
+          } else if (result.snapTop === undefined && lastSnapTop !== undefined) {
+            // Clear last snap when no longer snapping
+            lastSnapTop = undefined;
           }
-          target.setCoords();
+
+          if (snapLeftChanged || snapTopChanged) {
+            target.setCoords();
+          }
         }
 
         // Draw alignment guides
@@ -157,6 +320,9 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     // Clear alignment guides when object stops moving
     canvas.on('object:modified', () => {
       clearAlignmentGuides(canvas);
+      propsRef.current.resetSnapState(); // Reset snap state for next drag
+      lastSnapLeft = undefined; // Reset tracking
+      lastSnapTop = undefined;
       setDirty(true);
       setRotationAngle(null);
       setRotationPosition(null);
@@ -208,7 +374,7 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       }
     });
 
-    // Zoom with mouse wheel
+    // Zoom with mouse wheel - optimized with skipTargetFind
     canvas.on('mouse:wheel', (opt) => {
       const evt = opt.e as WheelEvent;
       const delta = evt.deltaY;
@@ -219,10 +385,18 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       if (zoom > 5) zoom = 5;
       if (zoom < 0.1) zoom = 0.1;
 
+      // Optimize for zoom operation
+      optimizeForZoomPan(canvas);
+
       // Zoom towards mouse cursor
       const point = new Point(evt.offsetX, evt.offsetY);
       canvas.zoomToPoint(point, zoom);
 
+      // Restore after zoom
+      restoreAfterZoomPan(canvas);
+
+      notifyViewportChange();
+      const { onZoomChange } = propsRef.current;
       if (onZoomChange) {
         onZoomChange(zoom);
       }
@@ -231,14 +405,15 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       evt.stopPropagation();
     });
 
-    // Panning with Shift+drag or middle mouse button
+    // Panning with Shift+drag or middle mouse button - optimized
     canvas.on('mouse:down', (opt) => {
       const evt = opt.e as MouseEvent;
       // Check if Shift key is pressed or middle mouse button
       if (evt.button === 1 || (evt.button === 0 && evt.shiftKey)) {
         isPanningRef.current = true;
         lastPosRef.current = { x: evt.clientX, y: evt.clientY };
-        canvas.selection = false;
+        // Optimize for pan operation
+        optimizeForZoomPan(canvas);
         canvas.defaultCursor = 'grab';
       }
     });
@@ -251,6 +426,7 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
           vpt[4] += evt.clientX - lastPosRef.current.x;
           vpt[5] += evt.clientY - lastPosRef.current.y;
           canvas.requestRenderAll();
+          notifyViewportChange();
           lastPosRef.current = { x: evt.clientX, y: evt.clientY };
         }
         canvas.defaultCursor = 'grabbing';
@@ -260,7 +436,8 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     canvas.on('mouse:up', () => {
       if (isPanningRef.current) {
         isPanningRef.current = false;
-        canvas.selection = true;
+        // Restore after pan operation
+        restoreAfterZoomPan(canvas);
         canvas.defaultCursor = 'default';
       }
     });
@@ -270,6 +447,76 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       fabricRef.current = null;
     };
   }, [width, height, onCanvasReady, onSelectionChange, setDirty]);
+
+  // Centralized boundary management - single source of truth
+  const ensureBoundary = useCallback((canvas: Canvas) => {
+    // Handle outer canvas boundary
+    const existingBoundary = canvas.getObjects().find((obj) => (obj as any).name === 'canvas-boundary');
+
+    if (existingBoundary) {
+      // Update boundary properties and position
+      existingBoundary.set({
+        left: 0,
+        top: 0,
+        width: width * SCALE,
+        height: height * SCALE,
+      });
+      // Ensure boundary remains non-interactive
+      makeNonInteractive(existingBoundary);
+      existingBoundary.setCoords();
+      canvas.sendObjectToBack(existingBoundary);
+    } else {
+      // Create boundary if missing
+      const boundary = new Rect({
+        left: 0,
+        top: 0,
+        width: width * SCALE,
+        height: height * SCALE,
+        fill: 'transparent',
+        stroke: '#3b82f6',
+        strokeWidth: 2,
+        excludeFromExport: true,  // Exclude from canvas JSON - this is a UI-only element
+        name: 'canvas-boundary',
+      });
+      makeNonInteractive(boundary);
+      canvas.add(boundary);
+      canvas.sendObjectToBack(boundary);
+    }
+
+    // Handle inner safety boundary
+    const existingSafetyBoundary = canvas.getObjects().find((obj) => (obj as any).name === 'safety-boundary');
+
+    if (existingSafetyBoundary) {
+      // Update safety boundary properties and position
+      existingSafetyBoundary.set({
+        left: SAFETY_MARGIN_MM * SCALE,
+        top: SAFETY_MARGIN_MM * SCALE,
+        width: (width - 2 * SAFETY_MARGIN_MM) * SCALE,
+        height: (height - 2 * SAFETY_MARGIN_MM) * SCALE,
+      });
+      // Ensure safety boundary remains non-interactive
+      makeNonInteractive(existingSafetyBoundary);
+      existingSafetyBoundary.setCoords();
+      canvas.sendObjectToBack(existingSafetyBoundary);
+    } else {
+      // Create safety boundary if missing
+      const safetyBoundary = new Rect({
+        left: SAFETY_MARGIN_MM * SCALE,
+        top: SAFETY_MARGIN_MM * SCALE,
+        width: (width - 2 * SAFETY_MARGIN_MM) * SCALE,
+        height: (height - 2 * SAFETY_MARGIN_MM) * SCALE,
+        fill: 'transparent',
+        stroke: '#f97316',  // Orange color to differentiate from outer boundary
+        strokeWidth: 1,
+        strokeDashArray: [8, 4],  // Dashed line
+        excludeFromExport: true,  // Exclude from canvas JSON - this is a UI-only element
+        name: 'safety-boundary',
+      });
+      makeNonInteractive(safetyBoundary);
+      canvas.add(safetyBoundary);
+      canvas.sendObjectToBack(safetyBoundary);
+    }
+  }, [width, height]);
 
   // Load canvas data when side changes
   useEffect(() => {
@@ -283,49 +530,33 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       if (!fabricRef.current || fabricRef.current !== canvas) return;
 
       if (data && data.objects) {
-        fabricRef.current.loadFromJSON(data, () => {
+        try {
+          // Use Promise-based API (Fabric.js 6.x)
+          await fabricRef.current.loadFromJSON(data);
+
           // Re-add boundary after loading
           if (fabricRef.current) {
-            const boundary = new Rect({
-              left: 0,
-              top: 0,
-              width: width * SCALE,
-              height: height * SCALE,
-              fill: 'transparent',
-              stroke: '#3b82f6',
-              strokeWidth: 2,
-              selectable: false,
-              evented: false,
-              excludeFromExport: true,
-              name: 'canvas-boundary',
-            });
-            fabricRef.current.add(boundary);
-            fabricRef.current.sendObjectToBack(boundary);
+            ensureBoundary(fabricRef.current);
             fabricRef.current.requestRenderAll();
             setDirty(false);
           }
-        });
+        } catch (error) {
+          console.error('Failed to load canvas from JSON:', error);
+          // Clear canvas and show boundary on error
+          if (fabricRef.current) {
+            fabricRef.current.clear();
+            fabricRef.current.backgroundColor = '#ffffff';
+            ensureBoundary(fabricRef.current);
+            fabricRef.current.requestRenderAll();
+          }
+        }
       } else {
         // Clear canvas for new side
         if (fabricRef.current) {
           fabricRef.current.clear();
           fabricRef.current.backgroundColor = '#ffffff';
           // Re-add boundary after clearing
-          const boundary = new Rect({
-            left: 0,
-            top: 0,
-            width: width * SCALE,
-            height: height * SCALE,
-            fill: 'transparent',
-            stroke: '#3b82f6',
-            strokeWidth: 2,
-            selectable: false,
-            evented: false,
-            excludeFromExport: true,
-            name: 'canvas-boundary',
-          });
-          fabricRef.current.add(boundary);
-          fabricRef.current.sendObjectToBack(boundary);
+          ensureBoundary(fabricRef.current);
           fabricRef.current.requestRenderAll();
           setDirty(false);
         }
@@ -333,7 +564,7 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     };
 
     load();
-  }, [projectId, side, loadCanvas, setDirty, width, height]);
+  }, [projectId, side, loadCanvas, setDirty, width, height, ensureBoundary]);
 
   // Update static guides when settings change
   useEffect(() => {
@@ -350,35 +581,50 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
         showHalves,
       });
     } else {
-      // Remove static guides
+      // Remove static guides with batch operation
       const staticGuides = canvas.getObjects().filter((obj) => (obj as any).name === 'staticGuide');
-      staticGuides.forEach((guide) => canvas.remove(guide));
-      canvas.requestRenderAll();
+      if (staticGuides.length > 0) {
+        batchRemoveObjects(canvas, staticGuides);
+      }
     }
   }, [showStaticGuides, showCenter, showThirds, showHalves, width, height]);
 
   // Handle canvas rotation for easier editing
+  // This only rotates the VIEWPORT, not the actual objects, so saved data remains in portrait
   useEffect(() => {
     if (!fabricRef.current) return;
 
     const canvas = fabricRef.current;
     const canvasHeight = height * SCALE;
 
+    // Get current zoom level from viewport transform
+    const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
+    const currentZoom = Math.abs(vpt[0] || vpt[1] || 1);
+
     if (isRotated) {
-      // Rotate canvas 90 degrees clockwise for landscape editing
-      // The transformation matrix rotates around the top-left corner
-      // then translates to position correctly
+      // Rotate viewport 90° clockwise for landscape editing
+      // Objects remain in their original positions, only the view rotates
       canvas.viewportTransform = [
-        0, 1, 0,           // Rotate 90° CW: x' = y
-        -1, 0, canvasHeight, // y' = -x + height
+        0, currentZoom, 0,           // Rotate 90° CW: x' = y, scaled by zoom
+        -currentZoom, 0, canvasHeight * currentZoom, // y' = -x + height, scaled by zoom
       ];
     } else {
-      // Reset to normal view (identity transform)
-      canvas.viewportTransform = [1, 0, 0, 1, 0, 0];
+      // Reset to normal portrait view, preserving zoom
+      canvas.viewportTransform = [currentZoom, 0, 0, currentZoom, 0, 0];
     }
 
+    // Boundary is managed automatically after rotation
+    ensureBoundary(canvas);
     canvas.requestRenderAll();
-  }, [isRotated, width, height]);
+
+    // Notify viewport change after rotation
+    if (onViewportChange) {
+      const vpt = canvas.viewportTransform;
+      if (vpt) {
+        onViewportChange({ x: vpt[4], y: vpt[5] });
+      }
+    }
+  }, [isRotated, width, height, ensureBoundary, onViewportChange]);
 
   return (
     <div

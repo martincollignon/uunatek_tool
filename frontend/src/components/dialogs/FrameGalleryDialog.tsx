@@ -272,7 +272,7 @@ export function FrameGalleryDialog({
 
           {/* Options */}
           <div style={{ marginTop: 24 }}>
-            <h3 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 16 }}>Options</h3>
+            <h3 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 16, color: 'var(--color-text-primary)' }}>Options</h3>
 
             <div className="form-group">
               <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
@@ -284,7 +284,7 @@ export function FrameGalleryDialog({
                 />
                 <span>Draw Border</span>
               </label>
-              <p style={{ fontSize: '0.75rem', color: '#666', marginTop: 4 }}>
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 4 }}>
                 Uncheck to use border only as a boundary for fills
               </p>
             </div>
@@ -349,7 +349,7 @@ export function FrameGalleryDialog({
                       style={{ width: 80 }}
                     />
                   </div>
-                  <p style={{ fontSize: '0.75rem', color: '#666', marginTop: 4 }}>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary)', marginTop: 4 }}>
                     Controls density of the pattern. Higher = more spaced out.
                   </p>
                 </div>
@@ -384,7 +384,7 @@ export function FrameGalleryDialog({
           {/* Preview */}
           {selectedFrame && (
             <div style={{ marginTop: 24 }}>
-              <h3 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 16 }}>Preview</h3>
+              <h3 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: 16, color: 'var(--color-text-primary)' }}>Preview</h3>
               <div className="frame-preview">
                 <div className="frame-preview-box">
                   <div className="frame-preview-icon">

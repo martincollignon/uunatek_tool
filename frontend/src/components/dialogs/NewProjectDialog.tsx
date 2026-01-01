@@ -117,7 +117,7 @@ export function NewProjectDialog({ onClose, onCreated }: Props) {
             )}
 
             <div className="form-group">
-              <label className="flex items-center gap-2" style={{ cursor: 'pointer' }}>
+              <label className="flex items-center gap-2" style={{ cursor: 'pointer', color: 'var(--color-text-primary)' }}>
                 <input
                   type="checkbox"
                   checked={isDoubleSided}
@@ -128,7 +128,7 @@ export function NewProjectDialog({ onClose, onCreated }: Props) {
             </div>
 
             <div className="form-group">
-              <label className="flex items-center gap-2" style={{ cursor: 'pointer' }}>
+              <label className="flex items-center gap-2" style={{ cursor: 'pointer', color: 'var(--color-text-primary)' }}>
                 <input
                   type="checkbox"
                   checked={includeEnvelope}

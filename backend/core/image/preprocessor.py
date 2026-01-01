@@ -43,6 +43,14 @@ class ImagePreprocessor:
         try:
             # Open image
             with Image.open(io.BytesIO(image_bytes)) as img:
+                # Apply EXIF orientation if present
+                try:
+                    from PIL import ImageOps
+                    img = ImageOps.exif_transpose(img)
+                    logger.info("Applied EXIF orientation correction")
+                except Exception as e:
+                    logger.debug(f"No EXIF orientation data or failed to apply: {e}")
+
                 original_mode = img.mode
                 original_size = img.size
                 logger.info(f"Processing image: {original_size}, mode: {original_mode}")
