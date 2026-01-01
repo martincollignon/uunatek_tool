@@ -19,4 +19,16 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    chunkSizeWarningLimit: 500,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-fabric': ['fabric'],
+          'vendor-zustand': ['zustand'],
+        },
+      },
+    },
+  },
 })

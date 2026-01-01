@@ -448,3 +448,5 @@ export function PlotPage() {
     </div>
   );
 }
+
+export default PlotPage;

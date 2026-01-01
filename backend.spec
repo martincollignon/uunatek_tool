@@ -2,15 +2,26 @@
 
 import sys
 from pathlib import Path
+import shutil
 
 # Get the backend directory
 backend_dir = Path('backend')
+
+# Find potrace binary
+potrace_path = shutil.which('potrace')
+binaries_list = []
+if potrace_path:
+    # Bundle potrace with the application
+    binaries_list.append((potrace_path, '.'))
+    print(f"Found potrace at: {potrace_path}")
+else:
+    print("WARNING: potrace not found in PATH. Image vectorization will not work.")
 
 # Analysis of the main module - use run_backend.py as entry point
 a = Analysis(
     ['run_backend.py'],
     pathex=[str(backend_dir)],
-    binaries=[],
+    binaries=binaries_list,
     datas=[
         # Include the built frontend dist folder
         ('frontend/dist', 'frontend/dist'),

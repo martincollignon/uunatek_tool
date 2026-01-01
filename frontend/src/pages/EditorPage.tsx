@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, lazy, Suspense } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Save, Play, Type, Image, Layers, Trash2, Sparkles, QrCode, Square, ChevronDown, ZoomIn, ZoomOut, Maximize2, Grid3x3, RotateCw, Undo2, Redo2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { Canvas, FabricObject, FabricImage, loadSVGFromString, util } from 'fabric';
@@ -8,11 +8,13 @@ import { useAlignmentGuidesStore } from '../stores/alignmentGuidesStore';
 import { FabricCanvas, ZoomControls } from '../components/canvas/FabricCanvas';
 import { LayerPanel } from '../components/layers/LayerPanel';
 import { SaveIndicator } from '../components/SaveIndicator';
-import { GeminiDialog } from '../components/dialogs/GeminiDialog';
-import { QRCodeDialog } from '../components/dialogs/QRCodeDialog';
-import { FrameGalleryDialog } from '../components/dialogs/FrameGalleryDialog';
-import ImageProcessDialog from '../components/dialogs/ImageProcessDialog';
+import { DialogLoadingFallback } from '../components/fallbacks/DialogLoadingFallback';
 import { validateImageFile, fileToDataURL, needsConversion } from '../utils/imageUtils';
+
+const GeminiDialog = lazy(() => import('../components/dialogs/GeminiDialog').then(m => ({ default: m.GeminiDialog })));
+const QRCodeDialog = lazy(() => import('../components/dialogs/QRCodeDialog').then(m => ({ default: m.QRCodeDialog })));
+const FrameGalleryDialog = lazy(() => import('../components/dialogs/FrameGalleryDialog').then(m => ({ default: m.FrameGalleryDialog })));
+const ImageProcessDialog = lazy(() => import('../components/dialogs/ImageProcessDialog'));
 import { createSimpleFrame, createDoubleFrame, createRoundedFrame, createOvalFrame } from '../utils/frameGenerator';
 import { useCanvasOperations } from '../hooks/useCanvasOperations';
 import { useCanvasSave } from '../hooks/useCanvasSave';
@@ -1298,42 +1300,50 @@ export function EditorPage() {
 
       {/* Gemini Dialog */}
       {showGeminiDialog && (
-        <GeminiDialog
-          onClose={() => setShowGeminiDialog(false)}
-          onImageGenerated={handleGeminiImageGenerated}
-        />
+        <Suspense fallback={<DialogLoadingFallback />}>
+          <GeminiDialog
+            onClose={() => setShowGeminiDialog(false)}
+            onImageGenerated={handleGeminiImageGenerated}
+          />
+        </Suspense>
       )}
 
       {/* QR Code Dialog */}
       {showQRCodeDialog && (
-        <QRCodeDialog
-          onClose={() => setShowQRCodeDialog(false)}
-          onSvgGenerated={handleQRCodeGenerated}
-        />
+        <Suspense fallback={<DialogLoadingFallback />}>
+          <QRCodeDialog
+            onClose={() => setShowQRCodeDialog(false)}
+            onSvgGenerated={handleQRCodeGenerated}
+          />
+        </Suspense>
       )}
 
       {/* Frame Gallery Dialog */}
       {showFrameGalleryDialog && currentProject && (
-        <FrameGalleryDialog
-          onClose={() => setShowFrameGalleryDialog(false)}
-          onFrameSelected={handleFrameGallerySelected}
-          canvasWidthMm={currentProject.width_mm}
-          canvasHeightMm={currentProject.height_mm}
-          canvas={fabricCanvas}
-        />
+        <Suspense fallback={<DialogLoadingFallback />}>
+          <FrameGalleryDialog
+            onClose={() => setShowFrameGalleryDialog(false)}
+            onFrameSelected={handleFrameGallerySelected}
+            canvasWidthMm={currentProject.width_mm}
+            canvasHeightMm={currentProject.height_mm}
+            canvas={fabricCanvas}
+          />
+        </Suspense>
       )}
 
       {/* Image Process Dialog */}
       {showImageProcessDialog && pendingImageDataUrl && (
-        <ImageProcessDialog
-          open={showImageProcessDialog}
-          onClose={() => {
-            setShowImageProcessDialog(false);
-            setPendingImageDataUrl(null);
-          }}
-          imageDataUrl={pendingImageDataUrl}
-          onAddToCanvas={handleAddImageToCanvas}
-        />
+        <Suspense fallback={<DialogLoadingFallback />}>
+          <ImageProcessDialog
+            open={showImageProcessDialog}
+            onClose={() => {
+              setShowImageProcessDialog(false);
+              setPendingImageDataUrl(null);
+            }}
+            imageDataUrl={pendingImageDataUrl}
+            onAddToCanvas={handleAddImageToCanvas}
+          />
+        </Suspense>
       )}
 
       {/* Save Indicator */}
@@ -1363,3 +1373,5 @@ export function EditorPage() {
     </div>
   );
 }
+
+export default EditorPage;
