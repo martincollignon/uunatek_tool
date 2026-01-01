@@ -470,6 +470,8 @@ export function createCheckerboardFill(options: FillPatternOptions): Group {
             stroke,
             strokeWidth,
             fill: '',
+            originX: 'left',  // Fabric 7 defaults to 'center'
+            originY: 'top',   // Fabric 7 defaults to 'center'
           }));
         }
       }

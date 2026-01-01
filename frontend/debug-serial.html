@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Debug Tauri Serial Connection</title>
+  <style>
+    body {
+      font-family: monospace;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    #log {
+      background: #fff;
+      border: 1px solid #ccc;
+      padding: 15px;
+      margin-top: 20px;
+      white-space: pre-wrap;
+      max-height: 600px;
+      overflow-y: auto;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .error {
+      color: #dc3545;
+      background: #fff5f5;
+      border: 1px solid #dc3545;
+      padding: 10px;
+      margin: 10px 0;
+    }
+    .success {
+      color: #28a745;
+      background: #f0fff4;
+      border: 1px solid #28a745;
+      padding: 10px;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Tauri Serial Port Debug</h1>
+  <div>
+    <button id="testBtn">Test Connection</button>
+    <button id="clearBtn">Clear Log</button>
+  </div>
+  <div id="log"></div>
+
+  <script type="module">
+    const log = document.getElementById('log');
+    const testBtn = document.getElementById('testBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    function logMessage(msg, isError = false, isSuccess = false) {
+      console.log(msg);
+      const div = document.createElement('div');
+      if (isError) div.className = 'error';
+      if (isSuccess) div.className = 'success';
+      div.textContent = msg;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    clearBtn.addEventListener('click', () => {
+      log.innerHTML = '';
+    });
+
+    testBtn.addEventListener('click', async () => {
+      const timestamp = new Date().toISOString();
+      logMessage(`\n=== Test started at ${timestamp} ===\n`);
+
+      try {
+        // Check Tauri environment
+        logMessage('[1] Checking Tauri environment...');
+        const hasTauriInternals = '__TAURI_INTERNALS__' in window;
+        const hasTauriIpc = typeof window.__TAURI_IPC__ !== 'undefined';
+        logMessage(`  __TAURI_INTERNALS__: ${hasTauriInternals}`);
+        logMessage(`  __TAURI_IPC__: ${hasTauriIpc}`);
+
+        if (!hasTauriInternals && !hasTauriIpc) {
+          logMessage('ERROR: Not running in Tauri environment!', true);
+          return;
+        }
+
+        // Import plugin
+        logMessage('\n[2] Importing tauri-plugin-serialplugin...');
+        const { SerialPort } = await import('tauri-plugin-serialplugin');
+        logMessage('  ✓ Plugin imported successfully', false, true);
+
+        // List ports
+        logMessage('\n[3] Listing available ports...');
+        const ports = await SerialPort.available_ports_direct();
+        logMessage(`  Found ${Object.keys(ports).length} ports:`);
+        for (const [path, info] of Object.entries(ports)) {
+          logMessage(`    ${path}`);
+          logMessage(`      type: ${info.port_type}`);
+          logMessage(`      VID: ${info.vid !== undefined ? '0x' + info.vid.toString(16).toUpperCase() : 'undefined'}`);
+          logMessage(`      PID: ${info.pid !== undefined ? '0x' + info.pid.toString(16).toUpperCase() : 'undefined'}`);
+          logMessage(`      manufacturer: ${info.manufacturer || 'N/A'}`);
+          logMessage(`      product: ${info.product || 'N/A'}`);
+        }
+
+        // Find plotter port
+        const portPath = Object.keys(ports).find(p => p.includes('cu.usbmodem201912341'));
+        if (!portPath) {
+          logMessage('\n[4] ERROR: Could not find /dev/cu.usbmodem201912341', true);
+          return;
+        }
+
+        logMessage(`\n[4] Found target port: ${portPath}`, false, true);
+
+        // Attempt to open
+        logMessage('\n[5] Attempting to open port...');
+        logMessage(`  Port: ${portPath}`);
+        logMessage(`  Baud rate: 115200`);
+        logMessage(`  Data bits: 8`);
+        logMessage(`  Flow control: None`);
+        logMessage(`  Parity: None`);
+        logMessage(`  Stop bits: 1`);
+        logMessage(`  Timeout: 1000ms`);
+
+        try {
+          await SerialPort.open(portPath, 115200, 8, 'None', 'None', 1, 1000);
+          logMessage('  ✓ Port opened successfully!', false, true);
+
+          // Try to send a status query
+          logMessage('\n[6] Sending status query (?)...');
+          const bytesWritten = await SerialPort.write(portPath, '?');
+          logMessage(`  ✓ Wrote ${bytesWritten} bytes`, false, true);
+
+          // Try to read response
+          logMessage('\n[7] Reading response (2000ms timeout)...');
+          try {
+            const response = await SerialPort.read(portPath, 2000, 1024);
+            logMessage(`  ✓ Received: ${response}`, false, true);
+          } catch (readErr) {
+            logMessage(`  Read timeout or error: ${readErr}`, true);
+          }
+
+          // Close port
+          logMessage('\n[8] Closing port...');
+          await SerialPort.close(portPath);
+          logMessage('  ✓ Port closed', false, true);
+
+          logMessage('\n✓✓✓ ALL TESTS PASSED! ✓✓✓', false, true);
+
+        } catch (openErr) {
+          logMessage('\n[5] ✗ FAILED TO OPEN PORT', true);
+          logMessage(`Error type: ${typeof openErr}`, true);
+          logMessage(`Error: ${openErr}`, true);
+          logMessage(`Error message: ${openErr.message || 'N/A'}`, true);
+          logMessage(`Error keys: ${openErr && typeof openErr === 'object' ? Object.keys(openErr).join(', ') : 'N/A'}`, true);
+          logMessage(`Error JSON: ${JSON.stringify(openErr, null, 2)}`, true);
+          if (openErr.stack) {
+            logMessage(`Stack trace: ${openErr.stack}`, true);
+          }
+        }
+
+      } catch (error) {
+        logMessage(`\n✗ FATAL ERROR: ${error}`, true);
+        logMessage(`Error type: ${typeof error}`, true);
+        logMessage(`Error message: ${error.message || 'N/A'}`, true);
+        if (error.stack) {
+          logMessage(`Stack trace: ${error.stack}`, true);
+        }
+        console.error('Full error object:', error);
+      }
+    });
+
+    // Auto-run test on load
+    logMessage('Debug page loaded. Click "Test Connection" to start.');
+  </script>
+</body>
+</html>

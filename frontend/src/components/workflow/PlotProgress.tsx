@@ -1,27 +1,72 @@
 import { Loader2, AlertTriangle } from 'lucide-react';
-import type { PlotProgress as PlotProgressType } from '../../types';
+import type { PlotProgress as OldPlotProgressType } from '../../types';
+import type { PlotProgress as NewPlotProgressType } from '../../lib/plotter';
 import type { PlotterError, RecoveryAction } from '../../types/errors';
 import { ErrorAlert } from '../errors/ErrorAlert';
 
+// Union type to support both old and new progress formats
+type PlotProgressUnion = OldPlotProgressType | NewPlotProgressType | null;
+
 interface Props {
-  progress: PlotProgressType | null;
+  progress: PlotProgressUnion;
   error?: PlotterError | null;
   onRecoveryAction?: (action: RecoveryAction) => void;
   onReportProblem?: () => void;
 }
 
+// Helper to normalize progress data from either format
+function normalizeProgress(progress: PlotProgressUnion): {
+  status: string;
+  currentCommand: number;
+  totalCommands: number;
+  percentage: number;
+  elapsedTime?: number;
+  estimatedRemaining?: number;
+  errorMessage?: string;
+  errorCode?: string;
+} | null {
+  if (!progress) return null;
+
+  // Check if it's the new format (has 'state' field)
+  if ('state' in progress) {
+    return {
+      status: progress.state,
+      currentCommand: progress.currentCommand,
+      totalCommands: progress.totalCommands,
+      percentage: progress.percentage,
+      errorMessage: progress.errorMessage,
+      errorCode: progress.errorCode,
+    };
+  }
+
+  // Old format (has 'status' field)
+  const oldProgress = progress as OldPlotProgressType;
+  const percentage = oldProgress.total_commands > 0
+    ? Math.round((oldProgress.current_command / oldProgress.total_commands) * 100)
+    : 0;
+
+  return {
+    status: oldProgress.status,
+    currentCommand: oldProgress.current_command,
+    totalCommands: oldProgress.total_commands,
+    percentage,
+    elapsedTime: oldProgress.elapsed_time,
+    estimatedRemaining: oldProgress.estimated_remaining,
+    errorMessage: oldProgress.error_message,
+    errorCode: oldProgress.error_code,
+  };
+}
+
 export function PlotProgress({ progress, error, onRecoveryAction, onReportProblem }: Props) {
-  if (!progress) {
+  const normalized = normalizeProgress(progress);
+
+  if (!normalized) {
     return (
       <div className="plot-progress">
         <p style={{ color: 'var(--color-text-secondary)' }}>No plot in progress</p>
       </div>
     );
   }
-
-  const percentage = progress.total_commands > 0
-    ? Math.round((progress.current_command / progress.total_commands) * 100)
-    : 0;
 
   const formatTime = (seconds: number): string => {
     if (seconds < 60) return `${Math.round(seconds)}s`;
@@ -34,24 +79,24 @@ export function PlotProgress({ progress, error, onRecoveryAction, onReportProble
     <div className="plot-progress">
       <div className="progress-header">
         <div className="flex items-center gap-2">
-          {progress.status === 'plotting' && <Loader2 size={16} className="animate-spin" />}
-          {progress.status === 'paused' && <AlertTriangle size={16} style={{ color: 'var(--color-warning)' }} />}
-          <span style={{ fontWeight: 500, textTransform: 'capitalize' }}>{progress.status}</span>
+          {normalized.status === 'plotting' && <Loader2 size={16} className="animate-spin" />}
+          {normalized.status === 'paused' && <AlertTriangle size={16} style={{ color: 'var(--color-warning)' }} />}
+          <span style={{ fontWeight: 500, textTransform: 'capitalize' }}>{normalized.status}</span>
         </div>
-        <span style={{ fontWeight: 600 }}>{percentage}%</span>
+        <span style={{ fontWeight: 600 }}>{normalized.percentage}%</span>
       </div>
 
       <div className="progress-bar-container">
         <div
           className="progress-bar"
           style={{
-            width: `${percentage}%`,
+            width: `${normalized.percentage}%`,
             backgroundColor:
-              progress.status === 'completed'
+              normalized.status === 'completed'
                 ? 'var(--color-success)'
-                : progress.status === 'error'
+                : normalized.status === 'error'
                   ? 'var(--color-error)'
-                  : progress.status === 'paused'
+                  : normalized.status === 'paused'
                     ? 'var(--color-warning)'
                     : 'var(--color-primary)',
           }}
@@ -62,25 +107,25 @@ export function PlotProgress({ progress, error, onRecoveryAction, onReportProble
         <div>
           <span style={{ color: 'var(--color-text-secondary)' }}>Commands: </span>
           <span>
-            {progress.current_command} / {progress.total_commands}
+            {normalized.currentCommand} / {normalized.totalCommands}
           </span>
         </div>
-        {progress.elapsed_time > 0 && (
+        {normalized.elapsedTime !== undefined && normalized.elapsedTime > 0 && (
           <div>
             <span style={{ color: 'var(--color-text-secondary)' }}>Elapsed: </span>
-            <span>{formatTime(progress.elapsed_time)}</span>
+            <span>{formatTime(normalized.elapsedTime)}</span>
           </div>
         )}
-        {progress.estimated_remaining > 0 && progress.status === 'plotting' && (
+        {normalized.estimatedRemaining !== undefined && normalized.estimatedRemaining > 0 && normalized.status === 'plotting' && (
           <div>
             <span style={{ color: 'var(--color-text-secondary)' }}>Remaining: </span>
-            <span>{formatTime(progress.estimated_remaining)}</span>
+            <span>{formatTime(normalized.estimatedRemaining)}</span>
           </div>
         )}
       </div>
 
       {/* Report Problem button - shown during plotting or paused state */}
-      {(progress.status === 'plotting' || progress.status === 'paused') && onReportProblem && (
+      {(normalized.status === 'plotting' || normalized.status === 'paused') && onReportProblem && (
         <div style={{ marginTop: 12 }}>
           <button
             className="btn btn-secondary"
@@ -105,7 +150,7 @@ export function PlotProgress({ progress, error, onRecoveryAction, onReportProble
       )}
 
       {/* Fallback simple error display if no structured error */}
-      {!error && progress.error_message && (
+      {!error && normalized.errorMessage && (
         <div
           style={{
             marginTop: 12,
@@ -116,10 +161,10 @@ export function PlotProgress({ progress, error, onRecoveryAction, onReportProble
             fontSize: '0.875rem',
           }}
         >
-          {progress.error_code && (
-            <span style={{ fontWeight: 600, marginRight: 8 }}>{progress.error_code}</span>
+          {normalized.errorCode && (
+            <span style={{ fontWeight: 600, marginRight: 8 }}>{normalized.errorCode}</span>
           )}
-          {progress.error_message}
+          {normalized.errorMessage}
         </div>
       )}
     </div>

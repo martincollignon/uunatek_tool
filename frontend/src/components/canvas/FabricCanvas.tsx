@@ -138,10 +138,29 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
   useEffect(() => {
     if (!canvasRef.current) return;
 
-    // Create fabric canvas
-    const canvas = new Canvas(canvasRef.current, {
-      width: width * SCALE,
-      height: height * SCALE,
+    // Calculate canvas dimensions in pixels (3px per mm)
+    const canvasWidth = width * SCALE;
+    const canvasHeight = height * SCALE;
+
+    console.log('[FabricCanvas] Setting up canvas:', { canvasWidth, canvasHeight, width, height, SCALE });
+
+    // For Fabric 7.x and React 19: Set canvas element dimensions
+    // Must happen BEFORE creating Fabric instance
+    const canvasEl = canvasRef.current;
+    canvasEl.width = canvasWidth;
+    canvasEl.height = canvasHeight;
+
+    console.log('[FabricCanvas] Canvas element dimensions set:', {
+      elementWidth: canvasEl.width,
+      elementHeight: canvasEl.height,
+      clientWidth: canvasEl.clientWidth,
+      clientHeight: canvasEl.clientHeight
+    });
+
+    // Create fabric canvas - pass dimensions to ensure Fabric knows the canvas size
+    const canvas = new Canvas(canvasEl, {
+      width: canvasWidth,
+      height: canvasHeight,
       backgroundColor: '#ffffff',
       preserveObjectStacking: true,
       selection: true,
@@ -151,16 +170,19 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     applyCanvasOptimizations(canvas);
 
     // Add canvas boundary rectangle (outer - full paper size)
+    // Position center at canvas center to align with Fabric 7 coordinate system
     const boundary = new Rect({
-      left: 0,
-      top: 0,
-      width: width * SCALE,
-      height: height * SCALE,
+      left: canvasWidth / 2,
+      top: canvasHeight / 2,
+      width: canvasWidth,
+      height: canvasHeight,
       fill: 'transparent',
       stroke: '#3b82f6',
       strokeWidth: 2,
       excludeFromExport: true,  // Exclude from canvas JSON - this is a UI-only element
       name: 'canvas-boundary',
+      originX: 'center',
+      originY: 'center',
     });
 
     // Make boundary non-interactive for performance
@@ -171,17 +193,20 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
 
     // Add safety boundary rectangle (inner - safe drawing area)
     // This shows where content will be clipped to prevent pen catching paper edge
+    const safetyMarginPx = SAFETY_MARGIN_MM * SCALE;
     const safetyBoundary = new Rect({
-      left: SAFETY_MARGIN_MM * SCALE,
-      top: SAFETY_MARGIN_MM * SCALE,
-      width: (width - 2 * SAFETY_MARGIN_MM) * SCALE,
-      height: (height - 2 * SAFETY_MARGIN_MM) * SCALE,
+      left: canvasWidth / 2,
+      top: canvasHeight / 2,
+      width: canvasWidth - 2 * safetyMarginPx,
+      height: canvasHeight - 2 * safetyMarginPx,
       fill: 'transparent',
       stroke: '#f97316',  // Orange color to differentiate from outer boundary
       strokeWidth: 1,
       strokeDashArray: [8, 4],  // Dashed line
       excludeFromExport: true,  // Exclude from canvas JSON - this is a UI-only element
       name: 'safety-boundary',
+      originX: 'center',
+      originY: 'center',
     });
 
     // Make safety boundary non-interactive for performance
@@ -199,7 +224,15 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
       if (onViewportChange) {
         const vpt = canvas.viewportTransform;
         if (vpt) {
-          onViewportChange({ x: vpt[4], y: vpt[5] });
+          // In rotated mode, vpt[5] includes canvasHeight*zoom for rotation
+          // Subtract the rotation baseline to get actual pan offset
+          const canvasHeightPx = height * SCALE;
+          const zoom = isRotated ? Math.abs(vpt[1]) : Math.abs(vpt[0]);
+
+          const panX = vpt[4];
+          const panY = isRotated ? vpt[5] - (canvasHeightPx * zoom) : vpt[5];
+
+          onViewportChange({ x: panX, y: panY });
         }
       }
     };
@@ -290,11 +323,11 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
     // Capture anchor mode when drag starts
     canvas.on('mouse:down:before', (opt) => {
       const target = opt.target;
-      if (!target || !opt.pointer) return;
+      if (!target || !opt.scenePoint) return;
 
       // Calculate which anchor region was clicked
       const objectBounds = target.getBoundingRect();
-      const anchorMode = calculateAnchorMode(opt.pointer, objectBounds);
+      const anchorMode = calculateAnchorMode(opt.scenePoint, objectBounds);
       dragAnchorModeRef.current = anchorMode;
     });
 
@@ -485,72 +518,58 @@ export function FabricCanvas({ width, height, projectId, side, onCanvasReady, on
 
   // Centralized boundary management - single source of truth
   const ensureBoundary = useCallback((canvas: Canvas) => {
-    // Handle outer canvas boundary
+    const canvasWidth = width * SCALE;
+    const canvasHeight = height * SCALE;
+    const safetyMarginPx = SAFETY_MARGIN_MM * SCALE;
+
+    // Handle outer canvas boundary - ALWAYS remove and recreate to fix Fabric 7 origin issues
     const existingBoundary = canvas.getObjects().find((obj) => (obj as any).name === 'canvas-boundary');
-
     if (existingBoundary) {
-      // Update boundary properties and position
-      existingBoundary.set({
-        left: 0,
-        top: 0,
-        width: width * SCALE,
-        height: height * SCALE,
-      });
-      // Ensure boundary remains non-interactive
-      makeNonInteractive(existingBoundary);
-      existingBoundary.setCoords();
-      canvas.sendObjectToBack(existingBoundary);
-    } else {
-      // Create boundary if missing
-      const boundary = new Rect({
-        left: 0,
-        top: 0,
-        width: width * SCALE,
-        height: height * SCALE,
-        fill: 'transparent',
-        stroke: '#3b82f6',
-        strokeWidth: 2,
-        excludeFromExport: true,  // Exclude from canvas JSON - this is a UI-only element
-        name: 'canvas-boundary',
-      });
-      makeNonInteractive(boundary);
-      canvas.add(boundary);
-      canvas.sendObjectToBack(boundary);
+      canvas.remove(existingBoundary);
     }
 
-    // Handle inner safety boundary
+    // Create boundary centered at canvas center
+    const boundary = new Rect({
+      left: canvasWidth / 2,
+      top: canvasHeight / 2,
+      width: canvasWidth,
+      height: canvasHeight,
+      fill: 'transparent',
+      stroke: '#3b82f6',
+      strokeWidth: 2,
+      excludeFromExport: true,  // Exclude from canvas JSON - this is a UI-only element
+      name: 'canvas-boundary',
+      originX: 'center',
+      originY: 'center',
+    });
+    makeNonInteractive(boundary);
+    canvas.add(boundary);
+    canvas.sendObjectToBack(boundary);
+
+    // Handle inner safety boundary - ALWAYS remove and recreate
     const existingSafetyBoundary = canvas.getObjects().find((obj) => (obj as any).name === 'safety-boundary');
-
     if (existingSafetyBoundary) {
-      // Update safety boundary properties and position
-      existingSafetyBoundary.set({
-        left: SAFETY_MARGIN_MM * SCALE,
-        top: SAFETY_MARGIN_MM * SCALE,
-        width: (width - 2 * SAFETY_MARGIN_MM) * SCALE,
-        height: (height - 2 * SAFETY_MARGIN_MM) * SCALE,
-      });
-      // Ensure safety boundary remains non-interactive
-      makeNonInteractive(existingSafetyBoundary);
-      existingSafetyBoundary.setCoords();
-      canvas.sendObjectToBack(existingSafetyBoundary);
-    } else {
-      // Create safety boundary if missing
-      const safetyBoundary = new Rect({
-        left: SAFETY_MARGIN_MM * SCALE,
-        top: SAFETY_MARGIN_MM * SCALE,
-        width: (width - 2 * SAFETY_MARGIN_MM) * SCALE,
-        height: (height - 2 * SAFETY_MARGIN_MM) * SCALE,
-        fill: 'transparent',
-        stroke: '#f97316',  // Orange color to differentiate from outer boundary
-        strokeWidth: 1,
-        strokeDashArray: [8, 4],  // Dashed line
-        excludeFromExport: true,  // Exclude from canvas JSON - this is a UI-only element
-        name: 'safety-boundary',
-      });
-      makeNonInteractive(safetyBoundary);
-      canvas.add(safetyBoundary);
-      canvas.sendObjectToBack(safetyBoundary);
+      canvas.remove(existingSafetyBoundary);
     }
+
+    // Create safety boundary centered at canvas center
+    const safetyBoundary = new Rect({
+      left: canvasWidth / 2,
+      top: canvasHeight / 2,
+      width: canvasWidth - 2 * safetyMarginPx,
+      height: canvasHeight - 2 * safetyMarginPx,
+      fill: 'transparent',
+      stroke: '#f97316',  // Orange color to differentiate from outer boundary
+      strokeWidth: 1,
+      strokeDashArray: [8, 4],  // Dashed line
+      excludeFromExport: true,  // Exclude from canvas JSON - this is a UI-only element
+      name: 'safety-boundary',
+      originX: 'center',
+      originY: 'center',
+    });
+    makeNonInteractive(safetyBoundary);
+    canvas.add(safetyBoundary);
+    canvas.sendObjectToBack(safetyBoundary);
   }, [width, height]);
 
   // Load canvas data when side changes

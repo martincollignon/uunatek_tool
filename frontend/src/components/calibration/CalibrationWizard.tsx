@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Check, ChevronRight, ChevronUp, Loader2, AlertCircle } from 'lucide-react';
-import { plotterApi } from '../../services/api';
+import { usePlotterStore } from '../../stores/plotterStore';
+import type { PlotCommand } from '../../lib/plotter';
 
 interface Props {
   onClose: () => void;
@@ -10,6 +11,8 @@ type WizardStep = 1 | 2 | 3 | 4 | 5;
 type TestResult = 'pending' | 'success' | 'retry';
 
 export function CalibrationWizard({ onClose }: Props) {
+  const { penUp, penDown, moveTo, home, startPlot } = usePlotterStore();
+
   const [currentStep, setCurrentStep] = useState<WizardStep>(1);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +25,7 @@ export function CalibrationWizard({ onClose }: Props) {
         return;
       }
       // Ensure pen is up before closing
-      plotterApi.penUp().catch(() => {});
+      penUp().catch(() => {});
     }
     onClose();
   };
@@ -31,7 +34,8 @@ export function CalibrationWizard({ onClose }: Props) {
     setIsLoading(true);
     setError(null);
     try {
-      await plotterApi.moveToTestPosition(50, 50);
+      // Move to test position (50mm, 50mm)
+      await moveTo(50, 50);
       setCurrentStep(3);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to move to test position');
@@ -44,7 +48,7 @@ export function CalibrationWizard({ onClose }: Props) {
     setIsLoading(true);
     setError(null);
     try {
-      await plotterApi.penDown();
+      await penDown();
       setPenIsDown(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to lower pen');
@@ -57,7 +61,7 @@ export function CalibrationWizard({ onClose }: Props) {
     setIsLoading(true);
     setError(null);
     try {
-      await plotterApi.penUp();
+      await penUp();
       setPenIsDown(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to raise pen');
@@ -70,7 +74,33 @@ export function CalibrationWizard({ onClose }: Props) {
     setIsLoading(true);
     setError(null);
     try {
-      await plotterApi.drawTestPattern(10);
+      // Draw a 10mm square with X pattern for calibration test
+      const size = 10;
+      const startX = 50;
+      const startY = 50;
+
+      const testCommands: PlotCommand[] = [
+        // Draw square
+        { type: 'pen_up' },
+        { type: 'move', x: startX, y: startY },
+        { type: 'pen_down' },
+        { type: 'line', x: startX + size, y: startY },
+        { type: 'line', x: startX + size, y: startY + size },
+        { type: 'line', x: startX, y: startY + size },
+        { type: 'line', x: startX, y: startY },
+        // Draw X
+        { type: 'pen_up' },
+        { type: 'move', x: startX, y: startY },
+        { type: 'pen_down' },
+        { type: 'line', x: startX + size, y: startY + size },
+        { type: 'pen_up' },
+        { type: 'move', x: startX + size, y: startY },
+        { type: 'pen_down' },
+        { type: 'line', x: startX, y: startY + size },
+        { type: 'pen_up' },
+      ];
+
+      await startPlot(testCommands, 'calibration');
       setTestResult('pending');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to draw test pattern');
@@ -93,8 +123,8 @@ export function CalibrationWizard({ onClose }: Props) {
   const handleComplete = async () => {
     // Ensure pen is up and return home
     try {
-      await plotterApi.penUp();
-      await plotterApi.home();
+      await penUp();
+      await home();
     } catch {
       // Ignore errors on completion
     }

@@ -7,6 +7,7 @@ interface RulerProps {
   zoom: number;
   offset?: { x: number; y: number };
   pixelsPerMm: number;
+  isRotated?: boolean;
 }
 
 export function Ruler({
@@ -15,13 +16,22 @@ export function Ruler({
   canvasHeightMm,
   zoom,
   offset = { x: 0, y: 0 },
-  pixelsPerMm
+  pixelsPerMm,
+  isRotated = false
 }: RulerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isHorizontal = orientation === 'horizontal';
   const RULER_SIZE = 30; // Height/width of ruler in pixels
   const [dimensions, setDimensions] = useState({ width: 1200, height: 1200 });
+
+  // Transform offset for rotated coordinate system
+  // When rotated 90° CW: visual X becomes original Y, visual Y becomes -original X
+  // But since we want rulers to stay in portrait orientation, we need to map
+  // the pan offset to match the ruler's coordinate system
+  const effectiveOffset = isRotated
+    ? { x: offset.y, y: -offset.x }
+    : offset;
 
   // Scale font size based on zoom level for better readability
   const getFontSize = () => {
@@ -102,7 +112,7 @@ export function Ruler({
       const pos = mm * pixelsPerMm * zoom;
 
       if (isHorizontal) {
-        const x = pos + offset.x;
+        const x = pos + effectiveOffset.x;
         if (x < 0 || x > canvas.width) continue;
 
         const tickHeight = isMajor ? RULER_SIZE * 0.6 : RULER_SIZE * 0.3;
@@ -118,7 +128,7 @@ export function Ruler({
           ctx.fillText(label, x - metrics.width / 2, RULER_SIZE - tickHeight - 4);
         }
       } else {
-        const y = pos + offset.y;
+        const y = pos + effectiveOffset.y;
         if (y < 0 || y > canvas.height) continue;
 
         const tickWidth = isMajor ? RULER_SIZE * 0.6 : RULER_SIZE * 0.3;
@@ -145,7 +155,7 @@ export function Ruler({
     ctx.lineWidth = 1;
     ctx.strokeRect(0, 0, canvas.width, canvas.height);
 
-  }, [orientation, canvasWidthMm, canvasHeightMm, zoom, offset, pixelsPerMm, isHorizontal, dimensions]);
+  }, [orientation, canvasWidthMm, canvasHeightMm, zoom, offset, pixelsPerMm, isHorizontal, dimensions, isRotated, effectiveOffset.x, effectiveOffset.y]);
 
   const width = isHorizontal ? '100%' : RULER_SIZE;
   const height = isHorizontal ? RULER_SIZE : '100%';

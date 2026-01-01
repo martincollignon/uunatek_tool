@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Project, ProjectCreate } from '../types';
-import { projectsApi } from '../services/api';
+import * as projectDB from '../services/projectDB';
 
 interface ProjectState {
   projects: Project[];
@@ -27,9 +27,10 @@ export const useProjectStore = create<ProjectState>((set) => ({
   loadProjects: async () => {
     set({ isLoading: true, error: null });
     try {
-      const projects = await projectsApi.list();
+      const projects = await projectDB.getAllProjects();
       set({ projects, isLoading: false });
     } catch (err) {
+      console.error('Failed to load projects:', err);
       set({ error: 'Failed to load projects', isLoading: false });
     }
   },
@@ -37,12 +38,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
   loadProject: async (id: string) => {
     set({ isLoading: true, error: null });
     try {
-      const project = await projectsApi.get(id);
+      const project = await projectDB.getProject(id);
+      if (!project) {
+        set({ error: 'Project not found', isLoading: false });
+        throw new Error('Project not found');
+      }
       set({ currentProject: project, isLoading: false });
     } catch (err: any) {
-      const errorMessage = err?.response?.status === 404
+      const errorMessage = err?.message === 'Project not found'
         ? 'Project not found'
         : 'Failed to load project';
+      console.error('Failed to load project:', err);
       set({ error: errorMessage, isLoading: false });
       throw err;
     }
@@ -51,14 +57,15 @@ export const useProjectStore = create<ProjectState>((set) => ({
   createProject: async (data: ProjectCreate) => {
     set({ isLoading: true, error: null });
     try {
-      const project = await projectsApi.create(data);
+      const project = await projectDB.createProject(data);
       set((state) => ({
-        projects: [...state.projects, project],
+        projects: [project, ...state.projects],
         currentProject: project,
         isLoading: false,
       }));
       return project;
     } catch (err) {
+      console.error('Failed to create project:', err);
       set({ error: 'Failed to create project', isLoading: false });
       throw err;
     }
@@ -67,13 +74,14 @@ export const useProjectStore = create<ProjectState>((set) => ({
   updateProject: async (id: string, data: Partial<Project>) => {
     set({ isLoading: true, error: null });
     try {
-      const updated = await projectsApi.update(id, data);
+      const updated = await projectDB.updateProject(id, data);
       set((state) => ({
         projects: state.projects.map((p) => (p.id === id ? updated : p)),
         currentProject: state.currentProject?.id === id ? updated : state.currentProject,
         isLoading: false,
       }));
     } catch (err) {
+      console.error('Failed to update project:', err);
       set({ error: 'Failed to update project', isLoading: false });
     }
   },
@@ -81,13 +89,14 @@ export const useProjectStore = create<ProjectState>((set) => ({
   deleteProject: async (id: string) => {
     set({ isLoading: true, error: null });
     try {
-      await projectsApi.delete(id);
+      await projectDB.deleteProject(id);
       set((state) => ({
         projects: state.projects.filter((p) => p.id !== id),
         currentProject: state.currentProject?.id === id ? null : state.currentProject,
         isLoading: false,
       }));
     } catch (err) {
+      console.error('Failed to delete project:', err);
       set({ error: 'Failed to delete project', isLoading: false });
     }
   },

@@ -51,6 +51,8 @@ export interface Project {
   paper_size: PaperSize;
   width_mm: number;
   height_mm: number;
+  custom_width_mm?: number;
+  custom_height_mm?: number;
   is_double_sided: boolean;
   include_envelope: boolean;
   envelope_address?: EnvelopeAddress;
@@ -121,3 +123,19 @@ export type WorkflowStep =
 
 // Canvas
 export type CanvasSide = 'front' | 'back' | 'envelope';
+
+// Gallery
+export interface GalleryImage {
+  id: string;                    // UUID
+  blob: Blob;                    // Full image as PNG blob
+  thumbnailDataUrl: string;      // Base64 thumbnail (150x150)
+  source: 'gemini' | 'upload' | 'processed';
+  createdAt: number;             // Unix timestamp
+  metadata: {
+    prompt?: string;
+    style?: string;
+    originalFilename?: string;
+    width: number;
+    height: number;
+  };
+}

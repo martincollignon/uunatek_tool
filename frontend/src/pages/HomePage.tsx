@@ -12,7 +12,8 @@ export function HomePage() {
 
   useEffect(() => {
     loadProjects();
-  }, [loadProjects]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleProjectCreated = (project: Project) => {
     setShowNewDialog(false);

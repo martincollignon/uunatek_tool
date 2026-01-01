@@ -42,6 +42,8 @@ export function createSimpleFrame(options: FrameOptions): Rect | null {
     strokeWidth: strokeWidthMm * SCALE,
     fill: 'transparent',
     strokeUniform: true,
+    originX: 'left',  // Fabric 7 defaults to 'center'
+    originY: 'top',   // Fabric 7 defaults to 'center'
     // Custom metadata for identification
     data: { isFrame: true, frameType: 'simple' },
   });
@@ -78,6 +80,8 @@ export function createDoubleFrame(options: FrameOptions): Group | null {
     strokeWidth: strokeWidthMm * SCALE,
     fill: 'transparent',
     strokeUniform: true,
+    originX: 'left',  // Fabric 7 defaults to 'center'
+    originY: 'top',   // Fabric 7 defaults to 'center'
   });
 
   // Inner rectangle (offset by gap)
@@ -90,6 +94,8 @@ export function createDoubleFrame(options: FrameOptions): Group | null {
     strokeWidth: strokeWidthMm * SCALE,
     fill: 'transparent',
     strokeUniform: true,
+    originX: 'left',  // Fabric 7 defaults to 'center'
+    originY: 'top',   // Fabric 7 defaults to 'center'
   });
 
   // Group both rectangles
@@ -131,6 +137,8 @@ export function createRoundedFrame(options: FrameOptions): Rect | null {
     strokeUniform: true,
     rx: cornerRadiusMm * SCALE,
     ry: cornerRadiusMm * SCALE,
+    originX: 'left',  // Fabric 7 defaults to 'center'
+    originY: 'top',   // Fabric 7 defaults to 'center'
     // Custom metadata for identification
     data: { isFrame: true, frameType: 'rounded' },
   });

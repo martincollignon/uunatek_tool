@@ -1,0 +1,26 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "enables the default permissions",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "serialplugin:allow-available-ports",
+    "serialplugin:allow-available-ports-direct",
+    "serialplugin:allow-cancel-read",
+    "serialplugin:allow-close",
+    "serialplugin:allow-close-all",
+    "serialplugin:allow-force-close",
+    "serialplugin:allow-open",
+    "serialplugin:allow-read",
+    "serialplugin:allow-write",
+    "serialplugin:allow-write-binary",
+    "serialplugin:allow-start-listening",
+    "serialplugin:allow-stop-listening",
+    "serialplugin:allow-set-timeout",
+    "serialplugin:allow-clear-buffer"
+  ]
+}
