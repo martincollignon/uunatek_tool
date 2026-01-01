@@ -147,31 +147,36 @@ async def process_image(request: ProcessImageRequest):
             style_prompts = {
                 "line_art": (
                     "Recreate this image as a clean line art illustration. "
-                    "Use bold, uniform black outlines to define all major shapes and objects. "
+                    "Use thin, uniform black outlines to define all major shapes and objects. "
                     "Simplify details into clear geometric forms. Use absolutely no shading - "
-                    "just clean outlines like a coloring book page. "
+                    "just clean, thin outlines like a coloring book page drawn with a fine-tip pen. "
+                    "Maintain consistent stroke width throughout (0.3-0.5mm thickness). "
                     "The background MUST be completely white #FFFFFF."
                 ),
                 "sketch": (
-                    "Recreate this image as a hand-drawn sketch with expressive linework. "
-                    "Vary the line weights - thicker lines for emphasis and foreground, thinner lines for details. "
+                    "Recreate this image as a hand-drawn sketch with expressive but thin linework. "
+                    "Use primarily thin, consistent lines (0.3-0.5mm) throughout the drawing. "
                     "Use loose, gestural strokes that feel organic and artistic. "
                     "Add minimal shading using only parallel hatching lines where needed for depth. "
+                    "Avoid thick or heavy lines - keep strokes light and uniform. "
                     "The background MUST be completely white #FFFFFF."
                 ),
                 "minimal": (
                     "Recreate this image in an extremely minimal, simplified style. "
-                    "Reduce the subject to its absolute essential shapes using the fewest possible lines. "
-                    "Think of iconic logos or pictograms - just the core silhouette and key features. "
+                    "Reduce the subject to its absolute essential shapes using the fewest possible thin lines. "
+                    "Think of iconic logos or pictograms drawn with a fine pen - just the core silhouette and key features. "
+                    "Use consistent thin line width (0.3-0.5mm) throughout. "
                     "No shading, no texture, no unnecessary details. Pure, elegant simplicity. "
                     "The background MUST be completely white #FFFFFF."
                 ),
                 "detailed": (
-                    "Recreate this image as an intricate pen and ink illustration. "
-                    "Use extensive cross-hatching and parallel line work to create rich tonal values and textures. "
-                    "Show depth through careful line density - closer hatching for darker areas, "
-                    "sparser hatching for lighter tones. Think of vintage engraving or etching techniques. "
-                    "Still no solid fills - everything must be achieved through line work only. "
+                    "Recreate this image as an intricate pen and ink illustration using thin, consistent lines. "
+                    "Use extensive cross-hatching and parallel line work with uniform thin strokes (0.3-0.5mm) "
+                    "to create rich tonal values and textures. "
+                    "Show depth through careful line density and spacing - closer hatching for darker areas, "
+                    "sparser hatching for lighter tones. Think of vintage engraving or etching techniques "
+                    "done with a fine-tip pen. "
+                    "Still no solid fills - everything must be achieved through thin line work only. "
                     "The background MUST be completely white #FFFFFF."
                 ),
             }
